@@ -985,6 +985,64 @@ def test_process_clone_request_duplicate_of_failed_clone_is_ignored(
     }
 
 
+def test_process_clone_request_records_over_cap_hints_as_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """References skipped because the clone-attempt cap was reached MUST be
+    recorded in ``state.ignored_hints`` (every spelling of each skipped
+    repo), so the R6 annotation tells the skill the verifier lacked access
+    to them — not silently dropped. The cap warning MUST count only the
+    distinct resolvable repos actually skipped, not every remaining list
+    entry (duplicates and unresolvable junk are not "skipped by the cap")."""
+    import logging
+
+    clone_calls: list[str] = []
+
+    def fake_clone(url, clone_root, **kwargs):
+        clone_calls.append(url)
+        p = Path(clone_root)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    monkeypatch.setattr(verify_module, "clone_additional_repo", fake_clone)
+    state = verify_module._RunState()
+
+    sources = [
+        {"repo_hint": "https://github.com/org/a"},
+        {"repo_hint": "https://github.com/org/b"},
+        {"repo_hint": "https://github.com/org/a.git"},  # dup of a, not skipped
+        {"repo_hint": "../not-a-url"},  # unresolvable
+        {"repo_hint": "https://github.com/org/c"},  # over cap
+        {"repo_hint": "https://github.com/org/c.git"},  # dup of over-cap c
+        {"repo_hint": "https://github.com/org/d"},  # over cap
+    ]
+    with caplog.at_level(logging.WARNING, logger="agent.verify"):
+        verify_module._process_clone_request(
+            {"requested_sources": sources},
+            state=state,
+            github_token="x",
+            github_host="github.com",
+            timeout_seconds=1,
+            additional_repos_dir=tmp_path / "additional_repos",
+            aliases={},
+            allowed_hosts=("github.com",),
+            max_additional_repos=2,
+        )
+
+    assert clone_calls == ["https://github.com/org/a", "https://github.com/org/b"]
+    assert state.ignored_hints == {
+        "../not-a-url",
+        "https://github.com/org/c",
+        "https://github.com/org/c.git",
+        "https://github.com/org/d",
+    }
+    cap_msgs = [r.getMessage() for r in caplog.records if "cap reached" in r.getMessage()]
+    assert len(cap_msgs) == 1
+    assert "skipped 2 " in cap_msgs[0]
+
+
 async def _run_preflight_with_extracted_refs(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

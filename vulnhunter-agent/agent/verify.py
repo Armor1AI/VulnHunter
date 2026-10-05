@@ -1021,13 +1021,18 @@ def _process_clone_request(
     charged once: later mentions are skipped before the budget check. A
     duplicate of a repo whose clone failed is recorded in
     ``state.ignored_hints`` too, so R6 covers claims citing either spelling.
+
+    Resolvable references past the cap are not cloned but ARE recorded in
+    ``state.ignored_hints`` (every spelling), so the R6 annotation tells
+    the skill the verifier had no local access to them.
     """
     additional_repos_dir.mkdir(parents=True, exist_ok=True)
     sources = payload.get("requested_sources", []) or []
     attempts = 0
-    # repo identity -> clone succeeded? (False = attempted and failed)
+    # repo identity -> cloned? (False = clone failed or skipped by the cap)
     seen: dict[str, bool] = {}
-    for index, entry in enumerate(sources):
+    skipped = 0
+    for entry in sources:
         hint = (entry or {}).get("repo_hint", "")
         if not hint or hint in state.ignored_hints:
             continue
@@ -1051,15 +1056,12 @@ def _process_clone_request(
         # (expensive) clone stage: charge the attempt budget here so that
         # failed clones count too.
         if attempts >= max_additional_repos:
-            remaining = len(sources) - index
-            logger.warning(
-                "Additional-repo clone-attempt cap reached (%d); skipping %d "
-                "remaining cross-repo reference(s). This bounds "
-                "resource use against attacker-supplied references.",
-                max_additional_repos,
-                remaining,
-            )
-            break
+            # Over the cap: don't clone, but record the hint so the R6
+            # annotation tells the skill the verifier lacked access to it.
+            seen[identity] = False
+            state.ignored_hints.add(hint)
+            skipped += 1
+            continue
         attempts += 1
         seen[identity] = False
         try:
@@ -1087,6 +1089,15 @@ def _process_clone_request(
             continue
         state.additional_repos.append(local)
         logger.info("Resolved additional repo %r -> %s", hint, local)
+    if skipped:
+        logger.warning(
+            "Additional-repo clone-attempt cap reached (%d); skipped %d "
+            "further distinct cross-repo reference(s) and recorded them as "
+            "ignored (R6). This bounds resource use against "
+            "attacker-supplied references.",
+            max_additional_repos,
+            skipped,
+        )
 
 
 def _sanitize_clone_subdir(hint: str) -> str:
