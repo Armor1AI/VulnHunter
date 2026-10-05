@@ -7,7 +7,7 @@ Public surface:
 
 - Constants: ``HAND_WAVE_PATTERNS``, ``TIER_ONE_LINERS``, ``SAFE_PHRASE_PATTERNS``
 - Exceptions: ``HonestyGuardError``, ``HandWaveResidualError``,
-  ``EmptyResidualError``, ``FullTierWithResidualsError``
+  ``EmptyResidualError``, ``FullTierWithResidualsError``, ``UnknownTierError``
 - Guards: ``check_hand_wave``, ``check_tier_residual_consistency``
 - Renderers: ``render_residual_risk_section``, ``render_pr_body_with_residuals``
 - Helpers: ``pr_draft_state_for_tier``, ``cwe_to_descriptor``,
@@ -121,6 +121,16 @@ class FullTierWithResidualsError(HonestyGuardError):
     """result-schema R-2: completeness_tier == FULL requires empty residual_vectors."""
 
 
+class UnknownTierError(HonestyGuardError):
+    """completeness_tier is not one of the result-schema enum values."""
+
+
+# result-schema.json ``completeness_tier`` enum. The tier is interpolated into
+# the PR/issue body as ``**{tier}**``, so anything outside this whitelist is
+# refused rather than rendered (PR #9 review, CWE-116).
+KNOWN_TIERS = ("FULL", *TIER_ONE_LINERS)
+
+
 def check_hand_wave(residual_vectors):
     """Raise HandWaveResidualError if any entry matches the hand-wave regex.
 
@@ -159,7 +169,12 @@ def render_residual_risk_section(vuln_id, tier, residual_vectors, issue_number=N
     Applies REQ-HON-006 / REQ-HON-007 / REQ-HON-009. Returns the rendered
     Markdown string. Raises HonestyGuardError subclasses on guard failure.
     Returns empty string when tier == FULL (no section rendered).
+    Raises ``UnknownTierError`` for a tier outside ``KNOWN_TIERS``.
     """
+    if tier not in KNOWN_TIERS:
+        raise UnknownTierError(
+            f"completeness_tier must be one of {KNOWN_TIERS}, got {tier!r}"
+        )
     check_tier_residual_consistency(tier, residual_vectors)
     if tier == "FULL":
         return ""
@@ -168,7 +183,7 @@ def render_residual_risk_section(vuln_id, tier, residual_vectors, issue_number=N
     bullets = "\n".join(
         f"- {_escape_residual_entry(entry)}" for entry in residual_vectors
     )
-    one_liner = TIER_ONE_LINERS.get(tier, "not fully closed")
+    one_liner = TIER_ONE_LINERS[tier]
     issue_ref = f" (see #{issue_number})" if issue_number else ""
     return (
         "## Residual Risk\n\n"

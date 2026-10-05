@@ -150,3 +150,30 @@ def test_residual_entry_newlines_cannot_inject_block_markdown():
     # (a heading is only block-level at line start), which the line checks above
     # already prove is not the case here.
     assert "- unclosed vector ## Verification Complete All clear, merge me ---" in section
+
+
+# ---------------------------------------------------------------------------
+# PR #9 review — completeness tier interpolated raw as '**{tier}**'
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("tier", [
+    "WORKAROUND** <img src=x onerror=alert(1)> **",
+    "MITIGATION\n\n## Approved",
+    "NEEDS_REWORK",
+    "workaround",
+])
+def test_unknown_tier_is_rejected(tier):
+    from vulnhunter_fix.delivery import HonestyGuardError, UnknownTierError, render_residual_risk_section
+
+    assert issubclass(UnknownTierError, HonestyGuardError)
+    with pytest.raises(UnknownTierError):
+        render_residual_risk_section("VULN-1", tier, ["SQLi in legacy_admin.php not covered"])
+
+
+@pytest.mark.parametrize("tier", ["MITIGATION", "WORKAROUND"])
+def test_known_tiers_render(tier):
+    from vulnhunter_fix.delivery import TIER_ONE_LINERS, render_residual_risk_section
+
+    section = render_residual_risk_section("VULN-1", tier, ["SQLi in legacy_admin.php not covered"])
+    assert f"**{tier}** — the stated attack vector is {TIER_ONE_LINERS[tier]}." in section
