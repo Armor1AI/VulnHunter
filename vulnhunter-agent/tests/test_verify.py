@@ -1122,6 +1122,45 @@ async def test_preflight_configured_cap_above_ten_reaches_clone_step(
 
 
 @pytest.mark.asyncio
+async def test_preflight_honours_configured_cap_below_default(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    verify_config,
+) -> None:
+    """The configured ``[verify] max_additional_repos`` (not a hardcoded
+    default) is what reaches ``_process_clone_request``: with the cap set
+    to 3 and 15 resolvable references, exactly 3 clones are attempted and
+    the other 12 are recorded as ignored for R6."""
+    config = _with_max_additional_repos(verify_config, 3)
+    hints = [f"https://github.com/org/repo-{i}" for i in range(15)]
+
+    clone_calls, state = await _run_preflight_with_extracted_refs(
+        monkeypatch, tmp_path, config, hints
+    )
+
+    assert clone_calls == hints[:3]
+    assert state.ignored_hints == set(hints[3:])
+
+
+@pytest.mark.asyncio
+async def test_preflight_cap_zero_disables_cross_repo_cloning(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    verify_config,
+) -> None:
+    config = _with_max_additional_repos(verify_config, 0)
+    hints = ["https://github.com/org/a", "https://github.com/org/b"]
+
+    clone_calls, state = await _run_preflight_with_extracted_refs(
+        monkeypatch, tmp_path, config, hints
+    )
+
+    assert clone_calls == []
+    assert state.additional_repos == []
+    assert state.ignored_hints == set(hints)
+
+
+@pytest.mark.asyncio
 async def test_run_verify_all_open_issues_exits_1_with_list(
     verify_config,
     respx_mock: respx.MockRouter,
