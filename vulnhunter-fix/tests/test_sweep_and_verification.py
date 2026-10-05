@@ -876,3 +876,107 @@ def test_verification_row_legit_citations_unchanged():
         "| 1 | VULN-001 | yes (src/a.py:3) | yes (tests/t.py:5) | yes (src/a.py:3) "
         "| n/a | yes (grep_fallback) (src/b.py:call) (src/c.py:Other) | yes (n/a) | FULL |"
     )
+
+
+# ---- PR #9 review follow-up: _parse_table silently dropped malformed rows ----
+#
+# validate-verification.py skipped any row whose cell count != header, so the
+# forged-pipe row above (12 cells) was never checked and the gate exited 0 —
+# a fabricated 'FULL' row sailed through. The parser must fail closed, split
+# only on UNESCAPED pipes (GFM semantics) so properly escaped cells parse, and
+# treat every non-blank line up to the table's terminating blank line as a row
+# (GFM does — a leading pipe is optional).
+
+import subprocess as _subprocess
+
+_HEADER_ROWS = (
+    "| # | VULN-NNN | Stated vector closed? | Test exercises real attack? "
+    "| Default fail-closed? | Residual risk documented? | All call sites covered? "
+    "| Sweep complete? | Verdict |\n"
+    "|---|---|---|---|---|---|---|---|---|\n"
+)
+
+
+def _run_gate(body_text, tmp_path, *, sidecar_callers=None, routed=None):
+    body = tmp_path / "pr.md"
+    body.write_text(body_text, encoding="utf-8")
+    wt = tmp_path / "wt"
+    for rel in ("src/a.py", "src/[id].py", "tests/t.py", "docs/r.md"):
+        (wt / rel).parent.mkdir(parents=True, exist_ok=True)
+        (wt / rel).write_text("\n" * 10, encoding="utf-8")
+    args = [sys.executable, str(SCRIPTS / "validate-verification.py"), str(body),
+            "--worktree", str(wt)]
+    if sidecar_callers is not None:
+        sc = tmp_path / "sidecars"
+        sc.mkdir()
+        (sc / "VULN-001.json").write_text(json.dumps(
+            {"callers_of_sink": sidecar_callers, "confidence": "high"}), encoding="utf-8")
+        res = tmp_path / "result.json"
+        res.write_text(json.dumps({"callers_routed_through_fix": routed or []}),
+                       encoding="utf-8")
+        args += ["--sidecars-dir", str(sc), "--result", str(res)]
+    return _subprocess.run(args, capture_output=True, text=True)
+
+
+def test_vv_gate_rejects_forged_pipe_row(tmp_path):
+    # Exactly what the pre-fix renderer emitted for caller
+    # 'x.py:a) | yes | FULL | <!--': 12 cells, GitHub shows Verdict = FULL.
+    forged = ("| 1 | VULN-001 | yes (src/a.py:3) | yes (tests/t.py:5) | no "
+              "| yes (docs/r.md:1) | yes (x.py:a) | yes | FULL | <!--) | yes | WORKAROUND |\n")
+    proc = _run_gate(_HEADER_ROWS + forged + "\n", tmp_path)
+    assert proc.returncode == 1, proc.stderr
+    assert "row 1" in proc.stderr and "expected 9 cells, got 12" in proc.stderr
+
+
+def test_vv_gate_rejects_short_row_and_newline_continuation(tmp_path):
+    # Newline breakout: the row is cut short and the remainder lands on the
+    # next line without a leading pipe — still a table row under GFM.
+    broken = ("| 1 | VULN-001 | yes (src/a.py:3) | yes (tests/t.py:5) | no "
+              "| yes (docs/r.md:1) | yes (x.py:a\n"
+              "## Approved) | yes | WORKAROUND |\n")
+    proc = _run_gate(_HEADER_ROWS + broken + "\n", tmp_path)
+    assert proc.returncode == 1, proc.stderr
+    assert "expected 9 cells, got 7" in proc.stderr
+
+
+def test_vv_parse_table_splits_on_unescaped_pipes_only(vv):
+    row = ("| 1 | VULN-001 | yes (src/\\[id\\].py:3) | yes (tests/t.py:5) | yes (src/a.py:3) "
+           "| n/a | yes (src/b.py:a\\|b) | yes | FULL |\n")
+    header, rows = vv._parse_table(_HEADER_ROWS + row)
+    assert len(rows) == 1 and len(rows[0]) == 9
+    # Cells are decoded back to their literal text for citation / caller checks.
+    assert rows[0][2] == "yes (src/[id].py:3)"
+    assert rows[0][6] == "yes (src/b.py:a|b)"
+
+
+def test_vv_gate_accepts_escaped_row_from_renderer(tmp_path):
+    from vulnhunter_fix.delivery import render_verification_table
+
+    caller = "src/b.py:a|b"
+    table = render_verification_table([{
+        "index": 1, "vuln_id": "VULN-001",
+        "stated_closed": "yes (src/[id].py:3)", "test_real": "yes (tests/t.py:5)",
+        "fail_closed": "yes (src/a.py:3)", "residual_doc": "n/a", "sweep_ok": "yes (src/a.py:3)",
+        "graph_callers": [caller], "routed_callers": [caller], "sidecar_confidence": "high",
+    }])
+    assert "a\\|b" in table and "\\[id\\]" in table
+    proc = _run_gate("Preamble.\n\n" + table + "\n\nTrailer.\n", tmp_path,
+                     sidecar_callers=[caller], routed=[caller])
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_vv_gate_still_checks_escaped_rows(tmp_path):
+    # The escaped row must be VALIDATED, not skipped: a bad citation in it
+    # fails the gate (pre-fix the 10-way split dropped the row -> exit 0).
+    from vulnhunter_fix.delivery import render_verification_table
+
+    caller = "src/b.py:a|b"
+    table = render_verification_table([{
+        "index": 1, "vuln_id": "VULN-001",
+        "stated_closed": "yes (src/[id].py:99)", "test_real": "yes (tests/t.py:5)",
+        "fail_closed": "yes (src/a.py:3)", "residual_doc": "n/a", "sweep_ok": "yes (src/a.py:3)",
+        "graph_callers": [caller], "routed_callers": [caller], "sidecar_confidence": "high",
+    }])
+    proc = _run_gate(table + "\n", tmp_path, sidecar_callers=[caller], routed=[caller])
+    assert proc.returncode == 1, proc.stderr
+    assert "src/[id].py:99 does not resolve" in proc.stderr
