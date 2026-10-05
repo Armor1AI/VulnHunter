@@ -136,6 +136,40 @@ def _sanitize_for_issue_body(value: str) -> str:
     return s
 
 
+def _sanitize_inline(value: str) -> str:
+    """``_sanitize_for_issue_body`` for fields rendered on a single line —
+    the ``### Finding`` table cells and the H2 title / Priority line.
+
+    Additionally escapes ``|`` as ``\\|`` (GFM's in-cell pipe escape; it
+    renders as a plain ``|`` outside a table too) so a value cannot add or
+    forge table cells, and collapses CR/LF runs to one space so it cannot end
+    the row/heading and inject block markdown (PR #9 review, CWE-116).
+    Multi-line free-form sections keep using ``_sanitize_for_issue_body``.
+    """
+    s = _sanitize_for_issue_body(value).replace("|", "\\|")
+    return re.sub(r"[\r\n]+", " ", s)
+
+
+_PLACEHOLDER_RE = re.compile(r"\{([A-Z_]+)\}")
+
+
+def _substitute(template: str, fields: dict[str, str]) -> tuple[str, set[str]]:
+    """Fill ``{NAME}`` placeholders in ONE pass over the template.
+
+    Field-by-field ``str.replace`` re-scanned already-substituted values, so
+    attacker text containing e.g. ``{IDEMPOTENCY_KEY}`` was expanded by a
+    later pass. Returns (body, template placeholders with no field)."""
+    missing: set[str] = set()
+
+    def repl(m: re.Match[str]) -> str:
+        if m.group(1) in fields:
+            return fields[m.group(1)]
+        missing.add(m.group(1))
+        return m.group(0)
+
+    return _PLACEHOLDER_RE.sub(repl, template), missing
+
+
 def render_body(
     f: Finding,
     *,
@@ -150,14 +184,17 @@ def render_body(
     anchor = _github_anchor(f"{f.id}: {f.title}") if f.id else ""
     deep_link = f"{report_url}#{anchor}" if anchor else report_url
     fields = {
-        # Attacker-influenced Finding fields — sanitized (CWE-79).
-        "TITLE": _sanitize_for_issue_body(f.title or "(untitled)"),
-        "CWE": _sanitize_for_issue_body(f.cwe or "Unknown CWE"),
-        "CWE_NAME": _sanitize_for_issue_body(f.cwe_name or "(unspecified)"),
-        "SEVERITY": _sanitize_for_issue_body(f.severity or "Unspecified"),
-        "LOCATION": _sanitize_for_issue_body(f.location or "(not specified)"),
-        "ROOT_CAUSE": _sanitize_for_issue_body(f.root_cause or "(not specified)"),
-        "DATA_FLOW": _sanitize_for_issue_body(f.data_flow or "(not specified)"),
+        # Attacker-influenced Finding fields — sanitized (CWE-79). Fields that
+        # render on a single line (``### Finding`` table cells, the H2 title,
+        # the Priority line) also get '|' escaped and CR/LF collapsed.
+        "TITLE": _sanitize_inline(f.title or "(untitled)"),
+        "CWE": _sanitize_inline(f.cwe or "Unknown CWE"),
+        "CWE_NAME": _sanitize_inline(f.cwe_name or "(unspecified)"),
+        "SEVERITY": _sanitize_inline(f.severity or "Unspecified"),
+        "LOCATION": _sanitize_inline(f.location or "(not specified)"),
+        "ROOT_CAUSE": _sanitize_inline(f.root_cause or "(not specified)"),
+        "DATA_FLOW": _sanitize_inline(f.data_flow or "(not specified)"),
+        # Free-form multi-line sections — newlines are legitimate here.
         "EXPLOIT_DESCRIPTION": _sanitize_for_issue_body(
             f.exploit_description or "(not specified in report)"
         ),
@@ -180,19 +217,12 @@ def render_body(
         "VULN_ID": _sanitize_marker_value(f.id),
         "RESULTS_DIR_NAME": _sanitize_marker_value(report.results_dir_name),
     }
-    body = template
-    for key, value in fields.items():
-        body = body.replace("{" + key + "}", value)
-    leftovers = _find_placeholders(body)
+    body, leftovers = _substitute(template, fields)
     if leftovers:
         logger.warning(
             "Template placeholders unfilled in rendered body: %s", sorted(leftovers)
         )
     return body
-
-
-def _find_placeholders(body: str) -> set[str]:
-    return set(re.findall(r"\{([A-Z_]+)\}", body))
 
 
 @dataclass(frozen=True)
@@ -272,10 +302,7 @@ def _render_clean_scan(ctx: CleanScanContext, template_path: Path) -> str:
         "SKILL_VERSION": ctx.skill_version or "unknown",
         "REPORT_URL_LINE": report_line,
     }
-    body = template
-    for key, value in fields.items():
-        body = body.replace("{" + key + "}", value)
-    leftovers = _find_placeholders(body)
+    body, leftovers = _substitute(template, fields)
     if leftovers:
         logger.warning(
             "Clean-scan template placeholders unfilled: %s", sorted(leftovers)
