@@ -758,6 +758,23 @@ async def test_run_verify_preflight_unresolvable_hint_becomes_ignored(
     assert "agent annotations" in captured_comments[0]
 
 
+def test_clone_cap_default_has_single_source_of_truth() -> None:
+    """The clone cap default lives only on ``VerifyConfig``: verify.py must
+    not carry its own duplicate constant, and ``_process_clone_request``'s
+    fallback default must be the config default."""
+    import inspect
+
+    from agent.config import VerifyConfig
+
+    assert not hasattr(verify_module, "MAX_ADDITIONAL_REPOS")
+    default = (
+        inspect.signature(verify_module._process_clone_request)
+        .parameters["max_additional_repos"]
+        .default
+    )
+    assert default == VerifyConfig.max_additional_repos
+
+
 def test_process_clone_request_caps_additional_repos(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -769,10 +786,12 @@ def test_process_clone_request_caps_additional_repos(
     unbounded clones -> disk/resource exhaustion.
 
     ``_process_clone_request`` MUST stop cloning once
-    ``MAX_ADDITIONAL_REPOS`` repos have been cloned, regardless of how
+    ``max_additional_repos`` (default from ``VerifyConfig``) repos have been cloned, regardless of how
     many resolvable sources were requested.
     """
-    cap = verify_module.MAX_ADDITIONAL_REPOS
+    from agent.config import VerifyConfig
+
+    cap = VerifyConfig.max_additional_repos
     # More resolvable sources than the cap.
     n_sources = cap * 5 + 3
     sources = [
@@ -834,7 +853,9 @@ def test_process_clone_request_caps_failed_clone_attempts(
     """
     from agent.verify_resolve import ResolveError
 
-    cap = verify_module.MAX_ADDITIONAL_REPOS
+    from agent.config import VerifyConfig
+
+    cap = VerifyConfig.max_additional_repos
     n_sources = cap * 5 + 3
     # Distinct, resolvable-but-nonexistent references (unique hints so the
     # ignored_hints dedup can't collapse them before the clone stage).

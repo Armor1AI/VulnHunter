@@ -840,7 +840,11 @@ def load_config(path: str | os.PathLike[str] | None = None) -> AgentConfig:
         ),
         max_additional_repos=int(
             _resolve(
-                verify_raw, "verify", "max_additional_repos", kind=int, default=10
+                verify_raw,
+                "verify",
+                "max_additional_repos",
+                kind=int,
+                default=VerifyConfig.max_additional_repos,
             )
         ),
     )

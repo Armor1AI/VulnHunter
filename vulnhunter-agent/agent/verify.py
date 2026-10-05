@@ -53,7 +53,7 @@ from ._github_verify import (
     make_client,
 )
 from .auth import TokenProvider, make_token_manager, resolve_verify
-from .config import AgentConfig
+from .config import AgentConfig, VerifyConfig
 from . import audit as _audit
 from .repo_properties import RepoProperties
 from .token_client import get_github_token
@@ -94,15 +94,6 @@ _EXIT_OK = 0
 _EXIT_INFRA_FAILURE = 1
 _EXIT_BAD_ARGS = 2
 _EXIT_AUTH_FAILURE = 3
-
-# Upper bound on additional repos cloned per verify run (CANON-37).
-# ``requested_sources`` is derived by an LLM from attacker-authored
-# issue/comment text and carries no length cap, so an attacker can pack
-# many distinct resolvable cross-repo references to force unbounded
-# clones (disk/resource exhaustion). Cap the number of repos cloned;
-# references past the cap are skipped. Well above any legitimate small-N
-# case, so normal runs are unaffected.
-MAX_ADDITIONAL_REPOS = 10
 
 
 # ---- result types ----------------------------------------------------------
@@ -993,7 +984,7 @@ def _process_clone_request(
     aliases: dict[str, str],
     allowed_hosts: tuple[str, ...] = (),
     allowed_token_path_prefixes: tuple[str, ...] = (),
-    max_additional_repos: int = MAX_ADDITIONAL_REPOS,
+    max_additional_repos: int = VerifyConfig.max_additional_repos,
 ) -> None:
     """Resolve the requested sources, cloning each that resolves and
     recording the rest as ignored.
@@ -1004,8 +995,9 @@ def _process_clone_request(
     Returns nothing — there's only one caller now (the pre-flight)
     and it doesn't need fixed-point detection.
 
-    The cap (``max_additional_repos``) bounds the number of *clone
-    attempts*, not the number of retained clones. ``clone_additional_repo``
+    The cap (``max_additional_repos``; production callers pass
+    ``config.verify.max_additional_repos``, CANON-37) bounds the number of
+    *clone attempts*, not the number of retained clones. ``clone_additional_repo``
     is the expensive step (a 300s shallow_clone over the network), and a
     FAILED clone doesn't grow ``state.additional_repos`` — so gating on the
     retained count lets an attacker pack many resolvable-but-nonexistent
