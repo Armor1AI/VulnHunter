@@ -40,6 +40,16 @@ import re
 # link/code metacharacters neutralizes ``[text](url)`` and inline code.
 _RESIDUAL_MD_ESCAPE_CHARS = ("\\", "`", "[", "]")
 
+# GitHub turns ``@user`` / ``@org/team`` into notifying mentions and bare
+# ``scheme://`` / ``www.`` text into live links. A zero-width-space character
+# reference (``&#8203;``, the Dependabot convention) between the trigger and
+# the rest keeps the text readable but inert. Only ``@`` directly followed by
+# a name character, ``://`` and a word-initial ``www.`` are touched, so plain
+# prose ("@ 10 rps", "note: ...") renders unchanged.
+_ZWSP_REF = "&#8203;"
+_MENTION_RE = re.compile(r"@(?=[A-Za-z0-9])")
+_WWW_AUTOLINK_RE = re.compile(r"\b(www)\.", re.IGNORECASE)
+
 
 def _escape_residual_entry(entry) -> str:
     """Neutralize markdown/HTML metacharacters in a residual-vector entry so it
@@ -49,10 +59,15 @@ def _escape_residual_entry(entry) -> str:
     let the entry break out of its bullet and inject top-level markdown blocks
     (headings, horizontal rules, fake prose), so runs of CR/LF are collapsed to
     a single space before the angle-bracket/backtick/bracket escaping (CANON-44,
-    CWE-116 line-break injection)."""
+    CWE-116 line-break injection). ``@mentions`` and bare autolinks
+    (``https://``, ``www.``) are defused with a zero-width space so the
+    entry cannot ping users/teams or render a live link."""
     s = html.escape(str(entry), quote=False)
     for ch in _RESIDUAL_MD_ESCAPE_CHARS:
         s = s.replace(ch, "\\" + ch)
+    s = _MENTION_RE.sub("@" + _ZWSP_REF, s)
+    s = s.replace("://", ":" + _ZWSP_REF + "//")
+    s = _WWW_AUTOLINK_RE.sub(r"\1" + _ZWSP_REF + ".", s)
     # Collapse newlines so an entry cannot span multiple markdown lines.
     s = re.sub(r"[\r\n]+", " ", s)
     return s

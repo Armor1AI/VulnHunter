@@ -177,3 +177,41 @@ def test_known_tiers_render(tier):
 
     section = render_residual_risk_section("VULN-1", tier, ["SQLi in legacy_admin.php not covered"])
     assert f"**{tier}** — the stated attack vector is {TIER_ONE_LINERS[tier]}." in section
+
+
+# ---------------------------------------------------------------------------
+# PR #9 review nit — residual entries could @mention users/teams (notification
+# spam under the operator's identity) or carry bare autolinks.
+# ---------------------------------------------------------------------------
+
+
+def test_residual_entry_mentions_are_neutralized():
+    from vulnhunter_fix.delivery import render_residual_risk_section
+
+    section = render_residual_risk_section(
+        "VULN-1", "WORKAROUND", ["ping @octocat and @acme/security-team now"]
+    )
+    assert "@octocat" not in section
+    assert "@acme/security-team" not in section
+    # Still readable: a zero-width space reference sits between '@' and the name.
+    assert "@&#8203;octocat" in section
+
+
+@pytest.mark.parametrize("payload, live", [
+    ("details at https://evil.example/phish", "https://"),
+    ("details at http://evil.example/phish", "http://"),
+    ("see www.evil.example for details", "www.evil"),
+])
+def test_residual_entry_bare_autolinks_are_broken(payload, live):
+    from vulnhunter_fix.delivery import render_residual_risk_section
+
+    section = render_residual_risk_section("VULN-1", "WORKAROUND", [payload])
+    assert live not in section
+
+
+def test_residual_entry_plain_prose_with_at_and_colon_unchanged():
+    from vulnhunter_fix.delivery import render_residual_risk_section
+
+    entry = "Rate limit @ 10 rps: /login endpoint not covered"
+    section = render_residual_risk_section("VULN-1", "WORKAROUND", [entry])
+    assert f"- {entry}" in section
