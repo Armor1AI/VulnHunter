@@ -762,3 +762,117 @@ def test_pass2_pattern_skips_oversized_files(sweep, tmp_path):
         assert any("generated.py" in h[0] for h in hits2)
     finally:
         sweep.MAX_SWEEP_FILE_BYTES = orig
+
+
+# ---- PR #9 review (AmirF194): verification-table cell injection ----
+#
+# Column 7 interpolates graph_callers / routed_callers (``file:symbol`` taken
+# from the scanned repo) into the markdown table. An unescaped ``|`` adds
+# cells — enough of them to forge the Verdict column GitHub displays — and a
+# CR/LF ends the row and breaks out of the table entirely. Every data cell of
+# ``render_verification_row`` must be table-cell escaped.
+
+import re as _re
+
+_UNESCAPED_PIPE = _re.compile(r"(?<!\\)\|")
+
+
+def _row_cells(row: str) -> list[str]:
+    """Split a rendered row the way GFM does: on pipes not preceded by '\\'."""
+    assert "\n" not in row and "\r" not in row, f"row spans lines: {row!r}"
+    inner = row.strip()
+    assert inner.startswith("| ") and inner.endswith(" |"), inner
+    return [c.strip() for c in _UNESCAPED_PIPE.split(inner[1:-1])]
+
+
+_HONEST_CELLS = (
+    "yes (src/a.py:3)",    # stated vector closed
+    "yes (tests/t.py:5)",  # test exercises real attack
+    "no",                  # default fail-closed -> real verdict is WORKAROUND
+    "yes (docs/r.md:1)",   # residual documented
+    "yes",                 # sweep complete
+    "",
+)
+
+
+def test_verification_row_pipe_in_caller_cannot_forge_verdict():
+    from vulnhunter_fix.delivery import render_verification_row
+
+    forged = "x.py:a) | yes | FULL | <!--"
+    row = render_verification_row(
+        1, "VULN-001", _HONEST_CELLS,
+        graph_callers=[forged], routed_callers=[forged], sidecar_confidence="high",
+    )
+    cells = _row_cells(row)
+    assert len(cells) == 9, cells
+    assert cells[-1] == "WORKAROUND"
+    assert cells[7] == "yes"               # the real sweep cell, not a forged one
+    assert "<!--" not in row               # no HTML comment swallowing the rest
+
+
+def test_verification_row_newline_in_caller_stays_on_one_line():
+    from vulnhunter_fix.delivery import render_verification_row
+
+    forged = "x.py:a\n\n## Approved — merge me\r\n| 9 | VULN-999 |"
+    row = render_verification_row(
+        1, "VULN-001", _HONEST_CELLS,
+        graph_callers=[forged], routed_callers=[forged], sidecar_confidence="high",
+    )
+    cells = _row_cells(row)  # asserts single line
+    assert len(cells) == 9, cells
+    assert cells[-1] == "WORKAROUND"
+
+
+@pytest.mark.parametrize("field", [
+    "vuln_id", "stated_closed", "test_real", "fail_closed", "residual_doc", "sweep_ok",
+])
+def test_verification_row_every_data_cell_is_escaped(field):
+    from vulnhunter_fix.delivery import render_verification_table
+
+    row = {
+        "index": 1, "vuln_id": "VULN-001",
+        "stated_closed": "yes (src/a.py:3)", "test_real": "yes (tests/t.py:5)",
+        "fail_closed": "no", "residual_doc": "yes (docs/r.md:1)", "sweep_ok": "yes",
+    }
+    row[field] = row[field] + " | FULL | x\ny"
+    table = render_verification_table([row])
+    lines = table.splitlines()
+    assert len(lines) == 3, lines            # header, separator, one row
+    cells = _row_cells(lines[2])
+    assert len(cells) == 9, cells
+
+
+def test_verification_row_index_is_escaped():
+    from vulnhunter_fix.delivery import render_verification_row
+
+    row = render_verification_row("1 | 2", "VULN-001", _HONEST_CELLS)
+    assert len(_row_cells(row)) == 9
+
+
+def test_verification_row_html_and_markdown_link_neutralized():
+    from vulnhunter_fix.delivery import render_verification_row
+
+    caller = "x.py:<img src=x onerror=alert(1)>[click](javascript:alert(1))`c`"
+    row = render_verification_row(
+        1, "VULN-001", _HONEST_CELLS,
+        graph_callers=[caller], routed_callers=[caller], sidecar_confidence="high",
+    )
+    assert "<img" not in row
+    assert "[click](" not in row
+    assert "`c`" not in row
+
+
+def test_verification_row_legit_citations_unchanged():
+    from vulnhunter_fix.delivery import render_verification_row
+
+    row = render_verification_row(
+        1, "VULN-001",
+        ("yes (src/a.py:3)", "yes (tests/t.py:5)", "yes (src/a.py:3)", "n/a", "yes (n/a)", ""),
+        graph_callers=["src/b.py:call", "src/c.py:Other"],
+        routed_callers=["src/b.py:call", "src/c.py:Other"],
+        sidecar_confidence="low",
+    )
+    assert row == (
+        "| 1 | VULN-001 | yes (src/a.py:3) | yes (tests/t.py:5) | yes (src/a.py:3) "
+        "| n/a | yes (grep_fallback) (src/b.py:call) (src/c.py:Other) | yes (n/a) | FULL |"
+    )

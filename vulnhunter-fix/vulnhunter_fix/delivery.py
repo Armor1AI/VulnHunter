@@ -202,12 +202,37 @@ def pr_draft_state_for_tier(tier):
 # ---------- Verification table (Bundle 2b, REQ-GRA-011 / REQ-GRA-013 / REQ-GRA-014) ----------
 
 
+def _escape_table_cell(value) -> str:
+    """Neutralize a value so it renders as exactly one literal GFM table cell.
+
+    Verification-table cells carry scan-derived text — column 7 interpolates
+    ``file:symbol`` callers taken from the scanned repo. An unescaped ``|``
+    adds cells (enough to forge the Verdict column GitHub displays) and a raw
+    CR/LF ends the row and breaks out of the table (PR #9 review, CWE-116).
+
+    Applies the same html/backtick/bracket convention as
+    ``_escape_residual_entry``, then escapes ``|`` as ``\\|`` (GFM's in-cell
+    pipe escape) and collapses CR/LF runs to a single space. Parentheses,
+    colons, slashes and dots are untouched, so ``yes (src/a.py:42)``
+    citations render — and validate — byte-for-byte unchanged.
+    """
+    s = html.escape(str(value), quote=False)
+    for ch in _RESIDUAL_MD_ESCAPE_CHARS:
+        s = s.replace(ch, "\\" + ch)
+    s = s.replace("|", "\\|")
+    return re.sub(r"[\r\n]+", " ", s)
+
+
 def _column7_cell(graph_callers, routed_callers, sidecar_confidence):
     """Render the `All call sites covered?` cell with truncation policy.
 
     REQ-GRA-013: enumerate all callers ≤ 20; when > 20, list the first 20
     lexicographic + `... N more via callers_of()`. REQ-GRA-020: annotate
     with `(grep_fallback)` under confidence=low.
+
+    Callers are scan-derived and returned RAW here; ``render_verification_row``
+    table-cell escapes the whole cell (``_escape_table_cell``) before it is
+    interpolated into the markdown row.
     """
     routed = set(routed_callers or ())
     graph = list(graph_callers or ())
@@ -269,12 +294,22 @@ def render_verification_row(index, vuln_id, cells6, graph_callers=None,
     `cells6` is a 6-tuple (stated_closed, test_real, fail_closed,
     residual_doc, sweep_ok, verdict_placeholder). Column 7 (call sites)
     is computed from graph_callers + routed_callers.
+
+    Every cell — including the computed column 7 and Verdict — passes
+    through ``_escape_table_cell`` so no input can add, drop or split cells.
+    The Verdict is derived from the escaped cells, i.e. from exactly what
+    the rendered row (and ``scripts/validate-verification.py``) shows.
     """
     stated_closed, test_real, fail_closed, residual_doc, sweep_ok, _placeholder = cells6
     col7 = _column7_cell(graph_callers, routed_callers, sidecar_confidence)
-    data_cells = (stated_closed, test_real, fail_closed, residual_doc, col7, sweep_ok)
+    data_cells = tuple(
+        _escape_table_cell(c)
+        for c in (stated_closed, test_real, fail_closed, residual_doc, col7, sweep_ok)
+    )
     verdict = _derive_verdict(data_cells)
-    return "| " + " | ".join([str(index), vuln_id, *data_cells, verdict]) + " |"
+    cells = [_escape_table_cell(index), _escape_table_cell(vuln_id), *data_cells,
+             _escape_table_cell(verdict)]
+    return "| " + " | ".join(cells) + " |"
 
 
 def render_verification_table(rows):
