@@ -456,3 +456,25 @@ class TestSinglePassSubstitution:
         body = render_clean_scan_body(_clean_scan_ctx(repo_slug="o/{SKILL_VERSION}"))
         assert "o/{SKILL_VERSION}" in body
         assert "o/3500d0c-clean" not in body  # never expanded by a later pass
+
+
+class TestMarkerSanitizeWarns:
+    """PR #9 review: _sanitize_marker_value silently stripped out-of-charset
+    chars, which can yield a marker pointing at a different results dir."""
+
+    def test_changed_marker_value_logs_warning(self, caplog) -> None:
+        with caplog.at_level("WARNING", logger="agent.issues_render"):
+            body = render_body(
+                _finding(),
+                report=_report(results_dir_name="r_VULNHUNT_RESULTS_a b/../c"),
+                report_url="https://example/README.md",
+            )
+        assert "<!-- vulnhunt-results-dir: r_VULNHUNT_RESULTS_ab..c -->" in body
+        assert "vulnhunt-results-dir" in caplog.text
+        assert "r_VULNHUNT_RESULTS_a b/../c" in caplog.text
+
+    def test_clean_marker_values_do_not_warn(self, caplog) -> None:
+        with caplog.at_level("WARNING", logger="agent.issues_render"):
+            render_body(_finding(), report=_report(),
+                        report_url="https://example/README.md")
+        assert caplog.text == ""

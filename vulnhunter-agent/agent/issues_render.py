@@ -113,10 +113,21 @@ _MD_ESCAPE_CHARS = ("\\", "`", "[", "]")
 _MARKER_UNSAFE_RE = re.compile(r"[^A-Za-z0-9._-]")
 
 
-def _sanitize_marker_value(value: str) -> str:
+def _sanitize_marker_value(value: str, marker: str = "marker") -> str:
     """Restrict an HTML-comment marker value to a safe identifier charset so it
-    cannot break out of the surrounding ``<!-- ... -->`` (CWE-116)."""
-    return _MARKER_UNSAFE_RE.sub("", value or "")
+    cannot break out of the surrounding ``<!-- ... -->`` (CWE-116).
+
+    Stripping can turn a value into a *different* identifier (e.g. a
+    results-dir name that now points at another directory), so any change is
+    logged as a warning rather than happening silently."""
+    raw = value or ""
+    cleaned = _MARKER_UNSAFE_RE.sub("", raw)
+    if cleaned != raw:
+        logger.warning(
+            "Stripped out-of-charset characters from %s marker value: %r -> %r",
+            marker, raw, cleaned,
+        )
+    return cleaned
 
 
 def _sanitize_for_issue_body(value: str) -> str:
@@ -213,9 +224,11 @@ def render_body(
         # Marker values are NOT html.escaped (keeps the marker regexes exact)
         # but ARE restricted to a safe identifier charset so an attacker-
         # influenced value cannot break out of the HTML comment (CWE-116).
-        "IDEMPOTENCY_KEY": _sanitize_marker_value(f.vulnfix_key),
-        "VULN_ID": _sanitize_marker_value(f.id),
-        "RESULTS_DIR_NAME": _sanitize_marker_value(report.results_dir_name),
+        "IDEMPOTENCY_KEY": _sanitize_marker_value(f.vulnfix_key, "vulnfix-key"),
+        "VULN_ID": _sanitize_marker_value(f.id, "vulnhunt-finding-id"),
+        "RESULTS_DIR_NAME": _sanitize_marker_value(
+            report.results_dir_name, "vulnhunt-results-dir"
+        ),
     }
     body, leftovers = _substitute(template, fields)
     if leftovers:
