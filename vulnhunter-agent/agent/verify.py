@@ -75,6 +75,7 @@ from .verify_resolve import (
     authorized_token_path_prefixes,
     clone_additional_repo,
     clone_target_repo,
+    repo_identity,
     resolve_repo_hint,
     stage_report,
 )
@@ -1013,10 +1014,19 @@ def _process_clone_request(
     entry clears the cheap pre-checks and is about to reach the clone stage,
     regardless of whether that clone ultimately succeeds. Cheap early-skips
     (empty hint, already-ignored, unresolved) do NOT consume the budget.
+
+    Duplicate mentions of the same repository — keyed by
+    ``repo_identity`` of the resolved URL, so an alias, an ``org/repo``
+    alias key and the various URL spellings of one repo collapse — are
+    charged once: later mentions are skipped before the budget check. A
+    duplicate of a repo whose clone failed is recorded in
+    ``state.ignored_hints`` too, so R6 covers claims citing either spelling.
     """
     additional_repos_dir.mkdir(parents=True, exist_ok=True)
     sources = payload.get("requested_sources", []) or []
     attempts = 0
+    # repo identity -> clone succeeded? (False = attempted and failed)
+    seen: dict[str, bool] = {}
     for index, entry in enumerate(sources):
         hint = (entry or {}).get("repo_hint", "")
         if not hint or hint in state.ignored_hints:
@@ -1029,6 +1039,13 @@ def _process_clone_request(
                 "annotating comments file under R6.",
                 hint,
             )
+            continue
+        identity = repo_identity(url)
+        if identity in seen:
+            # Same repo already attempted under another (or the same)
+            # spelling: never re-clone or re-charge the budget.
+            if not seen[identity]:
+                state.ignored_hints.add(hint)
             continue
         # This entry cleared the cheap pre-checks and is about to reach the
         # (expensive) clone stage: charge the attempt budget here so that
@@ -1044,6 +1061,7 @@ def _process_clone_request(
             )
             break
         attempts += 1
+        seen[identity] = False
         try:
             clone_root = additional_repos_dir / _sanitize_clone_subdir(hint)
             local = clone_additional_repo(
@@ -1064,6 +1082,7 @@ def _process_clone_request(
                 exc,
             )
             continue
+        seen[identity] = True
         if local in state.additional_repos:
             continue
         state.additional_repos.append(local)

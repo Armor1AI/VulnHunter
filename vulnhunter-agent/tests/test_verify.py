@@ -879,6 +879,112 @@ def test_process_clone_request_caps_failed_clone_attempts(
     )
 
 
+def test_process_clone_request_duplicate_mentions_do_not_burn_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """CANON-37 follow-up: the attempt cap must be charged once per
+    distinct *repository*, not once per mention. Ten mentions of
+    ``org/a`` — spelled as an alias, an ``org/repo`` alias key, and several
+    URL variants (``.git`` suffix, trailing slash, case, scp-style SSH) —
+    plus one mention of ``org/b`` with a cap of 2 MUST clone both repos in
+    exactly 2 attempts. Without identity-keyed dedup the duplicates exhaust
+    the budget and ``org/b`` is never cloned."""
+    a_mentions = [
+        "https://github.com/org/a",
+        "https://github.com/org/a.git",
+        "https://github.com/Org/A/",
+        "git@github.com:org/a.git",
+        "ssh://git@github.com/org/a",
+        "a",
+        "org/a",
+        "https://github.com/org/a",
+        "a",
+        "org/a",
+    ]
+    assert len(a_mentions) == 10
+    sources = [{"repo_hint": h} for h in a_mentions]
+    sources.append({"repo_hint": "https://github.com/org/b"})
+
+    clone_calls: list[str] = []
+
+    def fake_clone(url, clone_root, **kwargs):
+        clone_calls.append(url)
+        p = Path(clone_root)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    monkeypatch.setattr(verify_module, "clone_additional_repo", fake_clone)
+    state = verify_module._RunState()
+
+    verify_module._process_clone_request(
+        {"requested_sources": sources},
+        state=state,
+        github_token="x",
+        github_host="github.com",
+        timeout_seconds=1,
+        additional_repos_dir=tmp_path / "additional_repos",
+        aliases={
+            "a": "https://github.com/org/a.git",
+            "org/a": "https://github.com/org/a",
+        },
+        allowed_hosts=("github.com",),
+        max_additional_repos=2,
+    )
+
+    assert clone_calls == [
+        "https://github.com/org/a",
+        "https://github.com/org/b",
+    ]
+    assert len(state.additional_repos) == 2
+    assert state.ignored_hints == set()
+
+
+def test_process_clone_request_duplicate_of_failed_clone_is_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A second spelling of a repo whose clone already failed is not
+    re-attempted (no extra budget, no extra network clone) but is still
+    recorded in ``ignored_hints`` so the R6 annotation covers claims that
+    cite it under that spelling."""
+    from agent.verify_resolve import ResolveError
+
+    clone_calls: list[str] = []
+
+    def fake_clone(url, clone_root, **kwargs):
+        clone_calls.append(url)
+        raise ResolveError(f"repository not found: {url}")
+
+    monkeypatch.setattr(verify_module, "clone_additional_repo", fake_clone)
+    state = verify_module._RunState()
+
+    verify_module._process_clone_request(
+        {
+            "requested_sources": [
+                {"repo_hint": "https://github.com/org/gone"},
+                {"repo_hint": "https://github.com/org/gone.git"},
+                {"repo_hint": "gone"},
+            ]
+        },
+        state=state,
+        github_token="x",
+        github_host="github.com",
+        timeout_seconds=1,
+        additional_repos_dir=tmp_path / "additional_repos",
+        aliases={"gone": "git@github.com:org/gone.git"},
+        allowed_hosts=("github.com",),
+        max_additional_repos=5,
+    )
+
+    assert clone_calls == ["https://github.com/org/gone"]
+    assert state.ignored_hints == {
+        "https://github.com/org/gone",
+        "https://github.com/org/gone.git",
+        "gone",
+    }
+
+
 async def _run_preflight_with_extracted_refs(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
