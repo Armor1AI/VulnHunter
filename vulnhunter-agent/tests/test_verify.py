@@ -879,6 +879,84 @@ def test_process_clone_request_caps_failed_clone_attempts(
     )
 
 
+async def _run_preflight_with_extracted_refs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    config,
+    hints: list[str],
+) -> tuple[list[str], "verify_module._RunState"]:
+    """Drive ``_preflight_clone_requests`` end-to-end with the *real*
+    ``extract_cross_repo_references`` / ``_coerce_sources`` path (only
+    the LLM call is faked) so any truncation between extraction and the
+    clone loop is exercised. Returns the URLs that reached the clone step.
+    """
+    from agent import verify_refs as refs_mod
+
+    async def fake_call_json(**kwargs):
+        return {
+            "requested_sources": [
+                {"claim_excerpt": "see", "repo_hint": h, "reason": "x-repo"}
+                for h in hints
+            ]
+        }
+
+    clone_calls: list[str] = []
+
+    def fake_clone(url, clone_root, **kwargs):
+        clone_calls.append(url)
+        p = Path(clone_root)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    monkeypatch.setattr(refs_mod._llm, "call_json", fake_call_json)
+    monkeypatch.setattr(verify_module, "clone_additional_repo", fake_clone)
+    monkeypatch.setattr(
+        verify_module, "_build_preflight_text", lambda records: "comments"
+    )
+    _patch_token_manager(monkeypatch)
+
+    state = verify_module._RunState()
+    await verify_module._preflight_clone_requests(
+        records=[],
+        state=state,
+        config=config,
+        host="github.com",
+        run_dir=tmp_path,
+    )
+    return clone_calls, state
+
+
+def _with_max_additional_repos(config, n: int):
+    return dataclasses.replace(
+        config,
+        verify=dataclasses.replace(config.verify, max_additional_repos=n),
+    )
+
+
+@pytest.mark.asyncio
+async def test_preflight_configured_cap_above_ten_reaches_clone_step(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    verify_config,
+) -> None:
+    """``config.verify.max_additional_repos`` is the single control on
+    cross-repo clone work. With the cap configured to 20 and the extractor
+    returning 15 resolvable references, all 15 MUST reach the clone step —
+    no hidden pre-truncation of the extractor output (formerly a hardcoded
+    10 in ``verify_refs._coerce_sources``) may make a config value > 10
+    inert."""
+    config = _with_max_additional_repos(verify_config, 20)
+    hints = [f"https://github.com/org/repo-{i}" for i in range(15)]
+
+    clone_calls, state = await _run_preflight_with_extracted_refs(
+        monkeypatch, tmp_path, config, hints
+    )
+
+    assert clone_calls == hints
+    assert len(state.additional_repos) == 15
+    assert state.ignored_hints == set()
+
+
 @pytest.mark.asyncio
 async def test_run_verify_all_open_issues_exits_1_with_list(
     verify_config,
