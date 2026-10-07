@@ -70,7 +70,7 @@ def test_cmd_scan_success(monkeypatch, tmp_path):
             for t in targets[1:]
         ]
     monkeypatch.setattr(brun, "scan_targets", fake_scan_targets)
-    brun.cmd_scan(_Args(re_clone=False, resume=False, max_workers=2, execute=False))  # Updated for CANON-03
+    brun.cmd_scan(_Args(re_clone=False, resume=False, max_workers=2, execute=False))
 
 
 def test_cmd_scan_uses_unique_repository_targets(monkeypatch, tmp_path):
@@ -100,7 +100,7 @@ def test_cmd_scan_uses_unique_repository_targets(monkeypatch, tmp_path):
         lambda targets, **kwargs: scanned.extend(targets) or [],
     )
 
-    brun.cmd_scan(_Args(re_clone=False, resume=False, max_workers=2, readonly=False))
+    brun.cmd_scan(_Args(re_clone=False, resume=False, max_workers=2, execute=False))
 
     expected = ["team-one__service", "team-two__service"]
     assert [brun.os.path.basename(path) for path in clone_dirs] == expected
@@ -129,7 +129,7 @@ def test_cmd_scan_resume_partial(monkeypatch, tmp_path):
                         lambda targets, max_workers=None, log_filename=None, readonly=False: [
                             (t["key"], ScanResult(t["clone_dir"], t["key"], 0, 1, 1.0, "rd", {}))
                             for t in targets])
-    brun.cmd_scan(_Args(re_clone=False, resume=True, max_workers=1, execute=False))  # Updated for CANON-03
+    brun.cmd_scan(_Args(re_clone=False, resume=True, max_workers=1, execute=False))
 
 
 def test_cmd_scan_readonly_propagates(monkeypatch, tmp_path):
