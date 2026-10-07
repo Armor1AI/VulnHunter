@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -312,7 +313,93 @@ def extract_cost_from_log(log_file_path):
     return {}
 
 
-def scan_folder(folder_path, log_file=None, readonly=False):
+def _run_git(folder_path, *args):
+    """Run ``git <args>`` in folder_path; return stripped stdout or "" on any failure."""
+    try:
+        out = subprocess.run(["git", *args], cwd=folder_path,
+                             capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return out.stdout.strip() if out.returncode == 0 else ""
+
+
+def _normalize_repo_url(raw):
+    """Rewrite SSH to HTTPS, strip basic-auth userinfo and a trailing .git."""
+    url = raw.strip()
+    ssh = re.match(r"^git@([^:]+):(.+)$", url)
+    if ssh:
+        url = f"https://{ssh.group(1)}/{ssh.group(2)}"
+    url = re.sub(r"^(https?://)[^/@]+@", r"\1", url)
+    return url[:-len(".git")] if url.endswith(".git") else url
+
+
+def git_metadata(folder_path):
+    """Return (branch_label, repo_url) for the scan README header.
+
+    Mirrors vulnhunter-agent's pre-resolution so the skill never has to run
+    git itself: branch_label is "<branch> [<short-sha>]" or "unknown";
+    repo_url is the normalized origin URL, else the folder basename.
+    """
+    branch = _run_git(folder_path, "rev-parse", "--abbrev-ref", "HEAD")
+    sha = _run_git(folder_path, "rev-parse", "--short", "HEAD")
+    branch_label = f"{branch} [{sha}]" if branch and sha else "unknown"
+    repo_url = _normalize_repo_url(_run_git(folder_path, "remote", "get-url", "origin"))
+    return branch_label, repo_url or os.path.basename(folder_path)
+
+
+def create_results_dir(folder_path):
+    """Create a fresh <folder>/<basename>_VULNHUNT_RESULTS_<YYYY-MM-DD-HHMMSS> dir.
+
+    Same naming the skill uses when it has Bash. os.mkdir (not makedirs) fails
+    rather than reuse an existing dir.
+    """
+    stamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    results_dir = os.path.join(
+        folder_path, f"{os.path.basename(folder_path)}_VULNHUNT_RESULTS_{stamp}")
+    os.mkdir(results_dir)
+    return results_dir
+
+
+def build_scan_prompt(folder_path, results_dir, branch_label, repo_url, readonly):
+    """Compose the /vulnhunt kickoff prompt with a "Pre-resolved scan metadata" block.
+
+    The block is what SKILL.md path A consumes, so a headless scan with no Bash
+    doesn't stall asking the user for a results dir and git metadata.
+    """
+    prompt = (
+        f"/vulnhunt {folder_path}\n\n"
+        "IMPORTANT: This is running in non-interactive headless mode. "
+        "Do NOT ask for approval or confirmation. Execute immediately."
+    )
+    if readonly:
+        prompt += (
+            "  Perform a read-only scan, skip instructions related to "
+            "getting dependencies and executing code"
+        )
+        bash_line = "Bash is NOT available — use Read/Write/Edit/Grep/Glob only."
+    else:
+        bash_line = "Bash is AVAILABLE for exploit-test execution (--execute was passed)."
+    return (
+        f"{prompt}\n\n"
+        "Pre-resolved scan metadata (use these literal values — do NOT "
+        "run shell commands to recompute them):\n"
+        f"- VULNHUNT_DIR: {results_dir}\n"
+        f"- VULNHUNT_BRANCH: {branch_label}\n"
+        f"- Repository URL: {repo_url}\n"
+        f"- {bash_line}"
+    )
+
+
+def _abs_path_rule(tool, path):
+    """Permission rule for everything under path ("//" anchors at filesystem root).
+
+    realpath so the rule matches the path the CLI resolves (e.g. macOS
+    /tmp -> /private/tmp).
+    """
+    return f"{tool}(//{os.path.realpath(path).lstrip('/')}/**)"
+
+
+def scan_folder(folder_path, log_file=None, readonly=True):
     """Run vulnhunt on one folder, stream events to a log file.
 
     Returns a ScanResult (folder_path, label, returncode, event_count,
@@ -327,29 +414,48 @@ def scan_folder(folder_path, log_file=None, readonly=False):
         print(f"  [{ts()}] [{label}] Error: Skill not installed. Run install.sh first.")
         return ScanResult(folder_path, label, 1, 0, 0, None, {})
 
-    prompt = (
-        f"/vulnhunt {folder_path}\n\n"
-        "IMPORTANT: This is running in non-interactive headless mode. "
-        "Do NOT ask for approval or confirmation. Execute immediately."
-    )
-    if readonly:
-        prompt += (
-            "  Perform a read-only scan, skip instructions related to "
-            "getting dependencies and executing code"
-        )
+    results_dir = create_results_dir(folder_path)
+    branch_label, repo_url = git_metadata(folder_path)
+    prompt = build_scan_prompt(folder_path, results_dir, branch_label, repo_url, readonly)
 
     print(f"  [{ts()}] [{label}] STARTING scan", flush=True)
     start = time.time()
+
+    # CANON-03: scanning an untrusted repo is read-only BY DEFAULT so that
+    # prompt-injected content in the scanned repo cannot drive host command
+    # execution or tamper with the host.
+    #
+    # - --tools is the hard boundary on which tools exist at all: no Bash
+    #   (--allowedTools only pre-approves; it does not remove tools).
+    # - --permission-mode default + no bare Read/Write/Edit in --allowedTools:
+    #   reads are limited to the cwd and --add-dir roots (clone, skill, phases)
+    #   and the only pre-approved write target is the pre-created results dir.
+    #   Anything else needs a prompt, which headless -p mode denies.
+    # - --setting-sources user (CANON-19): don't load the clone's
+    #   .claude/settings*.json, whose hooks would otherwise run on the host.
+    # - --strict-mcp-config: --tools only limits built-ins; without this the
+    #   user's MCP servers (incl. claude.ai connectors) stay callable, which is
+    #   an exfiltration channel.
+    #
+    # --execute (readonly=False) is for trusted code only: it keeps the
+    # historical acceptEdits + Bash grant, still without project settings/MCP.
+    if readonly:
+        tool_args = ["--tools", "Read,Write,Edit,Grep,Glob,Agent",
+                     "--permission-mode", "default",
+                     "--allowedTools", _abs_path_rule("Edit", results_dir), "Agent"]
+    else:
+        tool_args = ["--allowedTools", "Read", "Write", "Edit", "Bash", "Agent",
+                     "--permission-mode", "acceptEdits"]
 
     proc = subprocess.Popen(
         ["claude", "-p", prompt,
          "--output-format", "stream-json",
          "--verbose",
-         "--allowedTools", "Read", "Write", "Edit", "Bash", "Agent",
-         "--permission-mode", "acceptEdits",
+         *tool_args,
+         "--setting-sources", "user",
+         "--strict-mcp-config",
          "--model", MODEL,
          "--add-dir", folder_path,
-         "--add-dir", os.path.dirname(folder_path),
          "--add-dir", SKILLS_DIR,
          "--add-dir", PHASES_DIR],
         stdout=subprocess.PIPE,
@@ -397,7 +503,7 @@ def scan_folder(folder_path, log_file=None, readonly=False):
 
     # A process that completed right as the timer fired can be flagged timed_out
     # even though it emitted a full result; don't discard a valid scan's data.
-    if timed_out and has_valid_results(folder_path):
+    if timed_out and _is_valid_readme(results_dir):
         timed_out = False
 
     if timed_out:
@@ -414,11 +520,13 @@ def scan_folder(folder_path, log_file=None, readonly=False):
         print(f"  [{ts()}] [{label}] FINISHED in {elapsed:.0f}s "
               f"(exit {proc.returncode}, {event_count} events{cost_str}{tokens_str})", flush=True)
 
-    results_dir = find_results_dir(folder_path)
+    # The dir is pre-created, so report it only once the scan wrote something.
+    if not os.listdir(results_dir):
+        results_dir = None
     return ScanResult(folder_path, label, proc.returncode, event_count, elapsed, results_dir, cost_data)
 
 
-def scan_folder_with_retry(folder_path, log_filename=None, readonly=False):
+def scan_folder_with_retry(folder_path, log_filename=None, readonly=True):
     """Wrap scan_folder with retry on 429 rate limit failures.
 
     Returns: Same ScanResult as scan_folder, with elapsed summed across attempts.
@@ -455,7 +563,7 @@ def scan_folder_with_retry(folder_path, log_filename=None, readonly=False):
         return result._replace(elapsed=total_elapsed)
 
 
-def scan_targets(targets, max_workers=None, status_interval=300, log_filename=None, readonly=False):
+def scan_targets(targets, max_workers=None, status_interval=300, log_filename=None, readonly=True):
     """Scan a list of benchmark targets in parallel with 429 retry.
 
     targets: list of dicts with at least 'clone_dir' and 'key' fields.

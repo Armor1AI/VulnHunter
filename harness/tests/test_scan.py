@@ -8,6 +8,26 @@ import pytest
 
 import local_harness.scan as scan
 
+# Captured before the autouse stub below replaces it, for the tests that
+# exercise the real git lookups.
+_real_git_metadata = scan.git_metadata
+
+
+@pytest.fixture(autouse=True)
+def _stub_git_metadata(monkeypatch):
+    # The scan_folder tests fake subprocess.Popen, which subprocess.run (used
+    # for the git lookups) goes through too; keep git out of them.
+    monkeypatch.setattr(scan, "git_metadata",
+                        lambda folder: ("main [abc1234]", "https://github.com/o/r"))
+
+
+def _prompt_results_dir(prompt):
+    """The VULNHUNT_DIR value from the kickoff prompt's pre-resolved metadata."""
+    for line in prompt.splitlines():
+        if line.startswith("- VULNHUNT_DIR: "):
+            return line[len("- VULNHUNT_DIR: "):]
+    raise AssertionError(f"no VULNHUNT_DIR in prompt: {prompt!r}")
+
 
 # --- results dir helpers ---
 
@@ -235,8 +255,12 @@ def test_scan_folder_success(monkeypatch, tmp_path):
     events.append(json.dumps({"type": "result", "total_cost_usd": 0.5,
                               "modelUsage": {"m": {"inputTokens": 4, "outputTokens": 6}}}))
     lines = [e + "\n" for e in events] + ["\n", "not-json\n"]
+    written = {}
 
-    def fake_popen(*a, **k):
+    def fake_popen(cmd, *a, **k):
+        written["rd"] = _prompt_results_dir(cmd[2])
+        with open(os.path.join(written["rd"], "README.md"), "w") as f:
+            f.write("report")
         return _FakePopen(lines, returncode=0)
     monkeypatch.setattr(scan.subprocess, "Popen", fake_popen)
 
@@ -250,14 +274,12 @@ def test_scan_folder_success(monkeypatch, tmp_path):
             pass
     monkeypatch.setattr(scan.threading, "Timer", _NoTimer)
 
-    rd = folder / "x_VULNHUNT_RESULTS_1"
-    rd.mkdir()
-
     result = scan.scan_folder(str(folder))
     folder_path, label, returncode, event_count, elapsed, results_dir, cost = result
     assert returncode == 0
     assert event_count == 4
-    assert results_dir == str(rd)
+    assert results_dir == written["rd"]
+    assert os.path.dirname(results_dir) == str(folder)
     assert cost["total_cost_usd"] == 0.5
 
 
@@ -286,8 +308,151 @@ def test_scan_folder_readonly_appends_prompt(monkeypatch, tmp_path):
     scan.scan_folder(str(folder), readonly=True)
     assert "read-only scan" in captured["prompt"]
 
+    scan.clean_prior_results(str(folder))  # as the retry path does between attempts
     scan.scan_folder(str(folder), readonly=False)
     assert "read-only scan" not in captured["prompt"]
+
+
+def _capture_scan_argv(monkeypatch, tmp_path, **scan_kwargs):
+    """Run scan_folder with Popen stubbed and return the claude argv."""
+    folder = tmp_path / "repo"
+    folder.mkdir()
+    monkeypatch.setattr(scan, "SKILLS_DIR", str(tmp_path / "skills"))
+    (tmp_path / "skills").mkdir()
+
+    captured = {}
+
+    def fake_popen(cmd, *a, **k):
+        captured["argv"] = cmd
+        return _FakePopen([json.dumps({"type": "result"}) + "\n"], returncode=0)
+    monkeypatch.setattr(scan.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(scan.threading, "Timer", _NoTimer)
+
+    scan.scan_folder(str(folder), **scan_kwargs)
+    return captured["argv"]
+
+
+def _flag_values(argv, flag):
+    """Values following `flag` up to the next --option."""
+    out = []
+    for tok in argv[argv.index(flag) + 1:]:
+        if tok.startswith("--"):
+            break
+        out.append(tok)
+    return out
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"readonly": True}])
+def test_scan_folder_readonly_tool_boundary(monkeypatch, tmp_path, kwargs):
+    """CANON-03: the default (and explicit) read-only scan is a real boundary.
+
+    --tools removes Bash outright (--allowedTools only pre-approves), and with
+    --permission-mode default the only pre-approved write is the pre-created
+    results dir: no bare Read/Write/Edit grant that would cover every path.
+    """
+    argv = _capture_scan_argv(monkeypatch, tmp_path, **kwargs)
+    assert not any("Bash" in tok for tok in argv[3:]), argv
+    assert _flag_values(argv, "--tools") == ["Read,Write,Edit,Grep,Glob,Agent"]
+    assert _flag_values(argv, "--permission-mode") == ["default"]
+
+    results_dir = _prompt_results_dir(argv[2])
+    rule = f"Edit(//{os.path.realpath(results_dir).lstrip('/')}/**)"
+    assert _flag_values(argv, "--allowedTools") == [rule, "Agent"]
+
+
+@pytest.mark.parametrize("readonly", [True, False])
+def test_scan_folder_skips_project_settings_and_mcp(monkeypatch, tmp_path, readonly):
+    """CANON-19 (harness): the clone's .claude/settings*.json hooks must not run
+    on the host, and MCP servers (an exfiltration channel) are not loaded, in
+    either mode."""
+    argv = _capture_scan_argv(monkeypatch, tmp_path, readonly=readonly)
+    assert _flag_values(argv, "--setting-sources") == ["user"]
+    assert "--strict-mcp-config" in argv
+
+
+def test_scan_folder_execute_optin_grants_bash(monkeypatch, tmp_path):
+    """CANON-03: only an explicit opt-out (readonly=False) re-adds Bash."""
+    argv = _capture_scan_argv(monkeypatch, tmp_path, readonly=False)
+    assert {"Read", "Write", "Edit", "Bash", "Agent"} <= set(_flag_values(argv, "--allowedTools"))
+    assert _flag_values(argv, "--permission-mode") == ["acceptEdits"]
+
+
+def test_scan_folder_readonly_no_parent_add_dir(monkeypatch, tmp_path):
+    """CANON-03/Fix B: a read-only (default) scan must NOT --add-dir the parent
+    (sibling clones). The scanned folder itself is still added."""
+    argv = _capture_scan_argv(monkeypatch, tmp_path)
+    folder = str(tmp_path / "repo")
+    add_dirs = [argv[i + 1] for i, tok in enumerate(argv[:-1]) if tok == "--add-dir"]
+    assert folder in add_dirs, add_dirs
+    assert os.path.dirname(folder) not in add_dirs, add_dirs
+
+
+@pytest.mark.parametrize("readonly,bash_line", [
+    (True, "Bash is NOT available"),
+    (False, "Bash is AVAILABLE"),
+])
+def test_scan_folder_prompt_has_preresolved_metadata(monkeypatch, tmp_path, readonly, bash_line):
+    """Without Bash, SKILL.md path B would ask the user for a results dir and
+    git metadata, which a headless run can't answer; the harness pre-creates
+    the dir and hands the values over as SKILL.md path A expects."""
+    argv = _capture_scan_argv(monkeypatch, tmp_path, readonly=readonly)
+    prompt = argv[2]
+    assert "Pre-resolved scan metadata" in prompt
+    results_dir = _prompt_results_dir(prompt)
+    assert os.path.isdir(results_dir)
+    assert os.path.basename(results_dir).startswith("repo_VULNHUNT_RESULTS_")
+    assert "- VULNHUNT_BRANCH: main [abc1234]" in prompt
+    assert "- Repository URL: https://github.com/o/r" in prompt
+    assert bash_line in prompt
+
+
+def test_scan_folder_results_dir_none_when_scan_wrote_nothing(monkeypatch, tmp_path):
+    folder = tmp_path / "repo"
+    folder.mkdir()
+    result = _run_fake_scan(monkeypatch, tmp_path, folder)
+    assert result.results_dir is None
+
+
+def test_create_results_dir_refuses_existing(monkeypatch, tmp_path):
+    class _FixedDatetime:
+        @staticmethod
+        def now():
+            import datetime as _dt
+            return _dt.datetime(2026, 1, 2, 3, 4, 5)
+    monkeypatch.setattr(scan, "datetime", _FixedDatetime)
+    rd = scan.create_results_dir(str(tmp_path))
+    assert rd == str(tmp_path / f"{tmp_path.name}_VULNHUNT_RESULTS_2026-01-02-030405")
+    with pytest.raises(FileExistsError):
+        scan.create_results_dir(str(tmp_path))
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("git@github.com:org/repo.git", "https://github.com/org/repo"),
+    ("https://user:tok@github.com/org/repo.git", "https://github.com/org/repo"),
+    ("https://github.com/org/repo", "https://github.com/org/repo"),
+])
+def test_normalize_repo_url(raw, expected):
+    assert scan._normalize_repo_url(raw) == expected
+
+
+def test_git_metadata_real_repo(tmp_path):
+    import subprocess
+    repo = tmp_path / "proj"
+    repo.mkdir()
+    git = ["git", "-c", "user.email=a@b", "-c", "user.name=a"]
+    subprocess.run(git + ["init", "-q", "-b", "main"], cwd=repo, check=True)
+    (repo / "f").write_text("x")
+    subprocess.run(git + ["add", "f"], cwd=repo, check=True)
+    subprocess.run(git + ["commit", "-qm", "c"], cwd=repo, check=True)
+    subprocess.run(["git", "remote", "add", "origin",
+                    "https://u:secret@github.com/org/proj.git"], cwd=repo, check=True)
+    branch, url = _real_git_metadata(str(repo))
+    assert branch.startswith("main [") and branch.endswith("]")
+    assert url == "https://github.com/org/proj"
+
+
+def test_git_metadata_not_a_repo(tmp_path):
+    assert _real_git_metadata(str(tmp_path)) == ("unknown", tmp_path.name)
 
 
 def test_scan_folder_timeout(monkeypatch, tmp_path):
@@ -327,14 +492,14 @@ def test_scan_folder_timeout_with_valid_results_not_discarded(monkeypatch, tmp_p
     monkeypatch.setattr(scan, "SKILLS_DIR", str(tmp_path / "skills"))
     (tmp_path / "skills").mkdir()
 
-    rd = folder / "x_VULNHUNT_RESULTS_1"
-    rd.mkdir()
-    (rd / "README.md").write_text("x" * 200)
-
     events = [json.dumps({"type": "result", "total_cost_usd": 0.9,
                           "modelUsage": {"m": {"inputTokens": 1, "outputTokens": 1}}}) + "\n"]
+    written = {}
 
-    def fake_popen(*a, **k):
+    def fake_popen(cmd, *a, **k):
+        written["rd"] = _prompt_results_dir(cmd[2])
+        with open(os.path.join(written["rd"], "README.md"), "w") as f:
+            f.write("x" * 200)
         return _FakePopen(events, returncode=0)
     monkeypatch.setattr(scan.subprocess, "Popen", fake_popen)
 
@@ -348,7 +513,7 @@ def test_scan_folder_timeout_with_valid_results_not_discarded(monkeypatch, tmp_p
     monkeypatch.setattr(scan.threading, "Timer", _FireTimer)
 
     result = scan.scan_folder(str(folder))
-    assert result.results_dir == str(rd)
+    assert result.results_dir == written["rd"]
     assert result.cost_data["total_cost_usd"] == 0.9  # not discarded
 
 
