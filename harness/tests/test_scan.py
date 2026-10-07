@@ -101,6 +101,44 @@ def test_clean_prior_results_missing_dir(tmp_path):
     assert scan.clean_prior_results(str(tmp_path / "nope")) == []
 
 
+def test_clean_prior_results_symlink_to_dir_no_crash(tmp_path):
+    # CANON-34: an untrusted clone can plant a symlink named
+    # *_VULNHUNT_RESULTS_* pointing at a directory. os.path.isdir follows the
+    # link so the old code reached shutil.rmtree(symlink) -> OSError, aborting
+    # the whole scan (DoS). Cleanup must remove the link (not its target)
+    # without raising.
+    target = tmp_path / "real_target_dir"
+    target.mkdir()
+    (target / "keep.txt").write_text("do not delete me")
+
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    link = clone / "evil_VULNHUNT_RESULTS_1"
+    os.symlink(str(target), str(link))
+
+    removed = scan.clean_prior_results(str(clone))  # must not raise
+    assert not os.path.lexists(str(link)), "planted symlink was not removed"
+    assert target.is_dir() and (target / "keep.txt").exists(), \
+        "symlink target must be left intact (only the link is removed)"
+
+
+def test_clean_incomplete_results_symlink_to_dir_no_crash(tmp_path):
+    # CANON-34 companion: same DoS applies to clean_incomplete_results.
+    target = tmp_path / "real_target_dir"
+    target.mkdir()
+    (target / "keep.txt").write_text("do not delete me")
+
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    link = clone / "evil_VULNHUNT_RESULTS_1"
+    os.symlink(str(target), str(link))
+
+    scan.clean_incomplete_results(str(clone))  # must not raise
+    assert not os.path.lexists(str(link)), "planted symlink was not removed"
+    assert target.is_dir() and (target / "keep.txt").exists(), \
+        "symlink target must be left intact (only the link is removed)"
+
+
 # --- log inspection ---
 
 def test_is_rate_limit_failure_no_file():
@@ -470,3 +508,237 @@ def test_scan_targets_default_workers(monkeypatch):
                         lambda cd, log_filename=None: (cd, "lbl", 0, 1, 1.0, "rd", {}))
     results = scan.scan_targets([{"clone_dir": "/c/a", "key": "a"}], status_interval=10_000)
     assert len(results) == 1
+
+
+# --- scan log must not follow links planted in the (untrusted) clone ---
+
+class _NoTimer:
+    def __init__(self, *a, **k):
+        pass
+
+    def start(self):
+        pass
+
+    def cancel(self):
+        pass
+
+
+def _run_fake_scan(monkeypatch, tmp_path, folder, **kw):
+    monkeypatch.setattr(scan, "SKILLS_DIR", str(tmp_path / "skills"))
+    (tmp_path / "skills").mkdir(exist_ok=True)
+    lines = [json.dumps({"type": "result", "total_cost_usd": 0.1}) + "\n"]
+    monkeypatch.setattr(scan.subprocess, "Popen",
+                        lambda *a, **k: _FakePopen(lines, returncode=0))
+    monkeypatch.setattr(scan.threading, "Timer", _NoTimer)
+    return scan.scan_folder(str(folder), **kw)
+
+
+def test_scan_folder_does_not_write_through_symlinked_log(monkeypatch, tmp_path):
+    # A repo can commit `benchmark_scan.log -> ~/.zshrc`; opening the log with
+    # plain open(path, "w") follows the link and truncates the host file.
+    victim = tmp_path / "victim_rc"
+    victim.write_text("export SECRET=1\n")
+    folder = tmp_path / "repo"
+    folder.mkdir()
+    log = folder / "benchmark_scan.log"
+    os.symlink(str(victim), str(log))
+
+    _run_fake_scan(monkeypatch, tmp_path, folder)
+
+    assert victim.read_text() == "export SECRET=1\n", "host file was overwritten via symlink"
+    assert not os.path.islink(str(log))
+    assert '"result"' in log.read_text()
+
+
+def test_scan_folder_does_not_create_dangling_symlink_target(monkeypatch, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    planted_target = outside / "created_by_attacker"
+    folder = tmp_path / "repo"
+    folder.mkdir()
+    log = folder / "batch_scan.log"
+    os.symlink(str(planted_target), str(log))
+
+    _run_fake_scan(monkeypatch, tmp_path, folder, log_file=str(log))
+
+    assert not planted_target.exists(), "dangling symlink target was created on the host"
+    assert log.is_file() and not os.path.islink(str(log))
+
+
+def test_scan_folder_does_not_truncate_hardlinked_log(monkeypatch, tmp_path):
+    # An agent with Bash in the clone could leave a hard link to a host file at
+    # the log path before a retry; O_TRUNC through it would clobber the file.
+    victim = tmp_path / "victim_rc"
+    victim.write_text("keep me\n")
+    folder = tmp_path / "repo"
+    folder.mkdir()
+    log = folder / "benchmark_scan.log"
+    os.link(str(victim), str(log))
+
+    _run_fake_scan(monkeypatch, tmp_path, folder)
+
+    assert victim.read_text() == "keep me\n"
+
+
+def _result_log(path, status=429):
+    path.write_text(json.dumps({"type": "result", "api_error_status": status,
+                                "total_cost_usd": 9.99}) + "\n")
+
+
+def test_log_readers_ignore_symlinked_log(tmp_path):
+    real = tmp_path / "elsewhere.log"
+    _result_log(real)
+    link = tmp_path / "benchmark_scan.log"
+    os.symlink(str(real), str(link))
+    assert scan.is_rate_limit_failure(str(link)) is False
+    assert scan.extract_cost_from_log(str(link)) == {}
+
+
+def test_log_readers_ignore_fifo_log(tmp_path):
+    fifo = tmp_path / "benchmark_scan.log"
+    os.mkfifo(str(fifo))
+    # Must return promptly rather than block opening the FIFO for read.
+    assert scan.is_rate_limit_failure(str(fifo)) is False
+    assert scan.extract_cost_from_log(str(fifo)) == {}
+
+
+def test_clean_prior_results_removes_dangling_log_link(tmp_path):
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    log = clone / "benchmark_scan.log"
+    os.symlink(str(tmp_path / "missing"), str(log))
+    removed = scan.clean_prior_results(str(clone))
+    assert not os.path.lexists(str(log))
+    assert "benchmark_scan.log" in removed
+
+
+def test_clean_prior_results_unlinks_log_link_not_target(tmp_path):
+    victim = tmp_path / "victim"
+    victim.write_text("keep")
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    log = clone / "benchmark_scan.log"
+    os.symlink(str(victim), str(log))
+    scan.clean_prior_results(str(clone))
+    assert not os.path.lexists(str(log))
+    assert victim.read_text() == "keep"
+
+
+def test_clean_incomplete_results_removes_dangling_log_link(tmp_path):
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    (clone / "clone_VULNHUNT_RESULTS_1").mkdir()  # incomplete: no README
+    log = clone / "batch_scan.log"
+    os.symlink(str(tmp_path / "missing"), str(log))
+    scan.clean_incomplete_results(str(clone), log_filename="batch_scan.log")
+    assert not os.path.lexists(str(log))
+
+
+# --- results-dir discovery must not trust links or repo-committed results ---
+
+import shutil as _shutil
+import subprocess as _subprocess
+
+_BIG_README = "# Report\n" + ("x" * 200) + "\n"
+
+
+def _real_results(parent, name="clone_VULNHUNT_RESULTS_1"):
+    rd = parent / name
+    rd.mkdir()
+    (rd / "README.md").write_text(_BIG_README)
+    return rd
+
+
+def test_find_results_dir_skips_symlinked_results_root(tmp_path):
+    outside = _real_results(tmp_path, "outside")
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    os.symlink(str(outside), str(clone / "clone_VULNHUNT_RESULTS_1"))
+    assert scan.find_results_dir(str(clone)) is None
+    assert scan.has_valid_results(str(clone)) is False
+
+
+def test_find_results_dir_prefers_real_dir_over_planted_link(tmp_path):
+    outside = _real_results(tmp_path, "outside")
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    os.symlink(str(outside), str(clone / "aaa_VULNHUNT_RESULTS_0"))
+    real = _real_results(clone, "clone_VULNHUNT_RESULTS_1")
+    assert scan.find_results_dir(str(clone)) == str(real)
+
+
+def test_has_valid_results_rejects_symlinked_readme(tmp_path):
+    host = tmp_path / "host_secret.txt"
+    host.write_text("s" * 500)
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    rd = clone / "clone_VULNHUNT_RESULTS_1"
+    rd.mkdir()
+    os.symlink(str(host), str(rd / "README.md"))
+    assert scan.has_valid_results(str(clone)) is False
+
+
+def _git(*args, cwd):
+    _subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+         *args],
+        cwd=cwd, check=True, capture_output=True,
+    )
+
+
+needs_git = pytest.mark.skipif(_shutil.which("git") is None, reason="git not installed")
+
+
+def _clone_with_committed_results(tmp_path):
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    _git("init", "-q", cwd=clone)
+    (clone / "app.py").write_text("print(1)\n")
+    _real_results(clone, "clone_VULNHUNT_RESULTS_2020-01-01-000000")
+    _git("add", "-A", cwd=clone)
+    _git("commit", "-q", "-m", "init", cwd=clone)
+    return clone
+
+
+@needs_git
+def test_committed_results_dir_is_not_trusted(tmp_path):
+    # A repo that ships its own *_VULNHUNT_RESULTS_* dir would make --resume
+    # skip the scan and collect publish the attacker's report.
+    clone = _clone_with_committed_results(tmp_path)
+    assert scan.find_results_dir(str(clone)) is None
+    assert scan.has_valid_results(str(clone)) is False
+
+
+@needs_git
+def test_committed_results_dir_ignored_but_scan_output_found(tmp_path):
+    clone = _clone_with_committed_results(tmp_path)
+    produced = _real_results(clone, "clone_VULNHUNT_RESULTS_2026-10-05-120000")
+    assert scan.find_results_dir(str(clone)) == str(produced)
+    assert scan.has_valid_results(str(clone)) is True
+
+
+@needs_git
+def test_clean_incomplete_results_removes_committed_results_dir(tmp_path):
+    clone = _clone_with_committed_results(tmp_path)
+    removed = scan.clean_incomplete_results(str(clone), log_filename="batch_scan.log")
+    assert removed == ["clone_VULNHUNT_RESULTS_2020-01-01-000000"]
+    assert not (clone / "clone_VULNHUNT_RESULTS_2020-01-01-000000").exists()
+
+
+@needs_git
+def test_committed_results_fallback_when_git_unavailable(monkeypatch, tmp_path):
+    # Without a usable git the check degrades to the previous behaviour.
+    clone = _clone_with_committed_results(tmp_path)
+
+    def boom(*a, **k):
+        raise FileNotFoundError("git")
+    monkeypatch.setattr(scan.subprocess, "run", boom)
+    assert scan.has_valid_results(str(clone)) is True
+
+
+def test_results_dir_not_a_git_repo_still_trusted(tmp_path):
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    rd = _real_results(clone)
+    assert scan.find_results_dir(str(clone)) == str(rd)
+    assert scan.has_valid_results(str(clone)) is True
