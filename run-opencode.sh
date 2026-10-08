@@ -438,6 +438,9 @@ if [ "$CONFIRMED_COUNT" -eq 0 ] && [ "${MANIFEST_COUNT:-1}" -ne 0 ]; then
 fi
 grep -Eo 'VULN-([0-9]{3}|PLATFORM-(AUTHN|AUTHZ))' "$README" \
     | sort -u > "$WORK_ROOT/readme-findings"
+grep -E 'VULN-[0-9]{3}.*SUBSUMED-BY: VULN-PLATFORM-(AUTHN|AUTHZ)' "$README" \
+    | grep -Eo 'VULN-[0-9]{3}' \
+    | sort -u > "$WORK_ROOT/subsumed-findings"
 while IFS= read -r README_FINDING; do
     [ -n "$README_FINDING" ] || continue
     case "
@@ -446,8 +449,10 @@ $SEEN_FINDINGS" in
 $README_FINDING
 "*) ;;
         *)
-            echo "error: README finding missing from manifest: $README_FINDING" >&2
-            MISSING_OUTPUT=1
+            if ! grep -Fx "$README_FINDING" "$WORK_ROOT/subsumed-findings" >/dev/null 2>&1; then
+                echo "error: README finding missing from manifest: $README_FINDING" >&2
+                MISSING_OUTPUT=1
+            fi
             ;;
     esac
 done < "$WORK_ROOT/readme-findings"

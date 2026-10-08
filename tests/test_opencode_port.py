@@ -284,8 +284,13 @@ if confirmed:
             (results / artifact).write_text("# phase summary\\n")
     (results / "poc").mkdir()
     (results / "exploit_tests").mkdir()
-    poc = "poc/VULN-001_sql_injection.md"
-    test = "exploit_tests/VULN-001_exploit_test.py"
+    finding_id = (
+        "VULN-PLATFORM-AUTHN"
+        if scenario.get("PLATFORM_ROLLUP") == "1"
+        else "VULN-001"
+    )
+    poc = f"poc/{finding_id}_sql_injection.md"
+    test = f"exploit_tests/{finding_id}_exploit_test.py"
     if scenario.get("SYMLINK_POC") == "1":
         os.symlink("../../app.py", results / poc)
     elif scenario.get("OMIT_FINDING_ARTIFACT") != "poc":
@@ -300,12 +305,17 @@ if confirmed:
     report = (
         "# VulnHunter Security Audit Report\\n\\n"
         "| ID | Evidence |\\n|---|---|\\n"
-        f"| VULN-001 | [PoC]({poc}) \\\\| [Test]({linked_test}) |\\n"
+        f"| {finding_id} | [PoC]({poc}) \\\\| [Test]({linked_test}) |\\n"
     )
+    if scenario.get("PLATFORM_ROLLUP") == "1":
+        report += (
+            "\\n- VULN-001 at app.py:1, CWE-306 — "
+            "SUBSUMED-BY: VULN-PLATFORM-AUTHN\\n"
+        )
     manifest = (
         "FINDING_COUNT: 0\\n"
         if scenario.get("OMIT_MANIFEST_FINDING") == "1"
-        else f"FINDING_COUNT: 1\\nVULN-001|{poc}|{test}\\n"
+        else f"FINDING_COUNT: 1\\n{finding_id}|{poc}|{test}\\n"
     )
 else:
     report = (
@@ -369,6 +379,9 @@ if scenario.get("OMIT_ARTIFACT") != "findings.manifest":
             report = re.search(r"^Report: (.+)$", completed.stdout, re.MULTILINE)
             self.assertIsNotNone(report)
             self.assertIn("VULN-001", Path(report.group(1)).read_text())
+
+            rollup = run_scenario({"PLATFORM_ROLLUP": "1"})
+            self.assertEqual(rollup.returncode, 0, rollup.stdout + rollup.stderr)
 
             failure_cases = (
                 ({"OMIT_RESULT": "nav"}, "missing scan result: sg-1_nav_results.md"),

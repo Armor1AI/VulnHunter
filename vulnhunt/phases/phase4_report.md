@@ -30,7 +30,9 @@ or correction before or after it.
 summary table. Its body lists every `SUBSUMED-BY: VULN-PLATFORM-*`
 finding (ID, file:line, CWE that would have been raised) so post-fix
 re-scan can confirm the expected-to-disappear set. Subsumed entries do
-NOT get their own summary-table rows.
+NOT get their own summary-table rows. Put each subsumed numeric ID and its exact
+`SUBSUMED-BY: VULN-PLATFORM-AUTHN` or `SUBSUMED-BY: VULN-PLATFORM-AUTHZ`
+marker on the same line.
 
 ### Summary
 
