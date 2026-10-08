@@ -9,7 +9,7 @@ vulnerabilities.
 
 ### Step 1: Structural Overview
 
-Use the **Glob tool** to discover all production source files by language. Run
+Use the **`glob` tool** to discover all production source files by language. Run
 multiple Glob calls **in parallel** for each language extension present:
 
 - `**/*.js`, `**/*.ts`, `**/*.tsx`, `**/*.go`, `**/*.java`, `**/*.scala`, `**/*.kt`,
@@ -55,7 +55,7 @@ point where external data enters the codebase.** This inventory is the
 completeness guarantee — every input gets traced to a disposition, and the audit
 is not done until the inventory is fully resolved.
 
-Use the **Grep tool** to find all user-controllable inputs, adapting patterns to
+Use the **`grep` tool** to find all user-controllable inputs, adapting patterns to
 the detected frameworks. Do NOT use the examples below verbatim — build patterns
 from what you actually found in Step 1.
 

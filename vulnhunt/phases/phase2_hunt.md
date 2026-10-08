@@ -6,7 +6,7 @@
 
 ## Phase 2: Vulnerability Hunting
 
-Phase 2 dispatches **parallel trace agents by class group** — for each subgraph
+Phase 2 dispatches **trace agents by class group** — for each subgraph
 partition from Phase 1, spawn one agent per vulnerability class group (INJ, NAV,
 LOG). Each agent traces ALL inputs in its partition but only evaluates sinks for
 its assigned class group. The orchestrator merges results across class groups and
@@ -30,6 +30,10 @@ Do NOT analyze partitions "inline" — every production partition gets agents.
 **Minimum agent count = (3 × production_partition_count) + 1 sink-driven.**
 If you spawned fewer, you violated the procedure.
 
+Every spawn in this phase MUST use OpenCode's `task` tool with
+`subagent_type: vulnhunt-worker`. No built-in `general`, `explore`, or other
+subagent is permitted.
+
 ---
 
 1. **Read the subgraph partitions** from the Phase 1 Recon Output. Each partition
@@ -51,21 +55,19 @@ If you spawned fewer, you violated the procedure.
    | Navigation/Auth | NAV | CSRF, IDOR, auth bypass, conditional validation bypass, identity spoofing, confused deputy, security signal spoofing, mass assignment, parameter pollution |
    | Logic/Crypto | LOG | Race conditions, cache isolation, credential scope, resource exhaustion, prototype pollution, crypto issues, integer overflow |
 
-   **Spawn agents in waves of at most 6** — dispatch up to 6 agents in a single
-   message, wait for all 6 to produce results files, then dispatch the next wave.
-   Do NOT dispatch all agents in one message regardless of partition count.
-   This cap prevents API rate-limit saturation; 12 concurrent agents still caused
-   429 failures in production.
+   **Run every agent synchronously in the foreground.** Dispatch one
+   `vulnhunt-worker`, wait for it to return, and verify that it produced the
+   required results file before dispatching the next worker. Never request a
+   background task. Headless OpenCode may exit when only background tasks
+   remain, leaving the scan incomplete.
 
-   Example: 6 partitions = 19 agents → wave 1: SG-1 INJ/NAV/LOG + SG-2 INJ/NAV/LOG
-   (6 agents), wait → wave 2: SG-3 INJ/NAV/LOG + SG-4 INJ/NAV/LOG (6 agents),
-   wait → wave 3: SG-5 INJ/NAV/LOG + SG-6 INJ/NAV/LOG (6 agents), wait →
-   wave 4: sink-driven (1 agent). Always dispatch the sink-driven agent as its
-   own final wave after all partition agents complete.
+   Example: 2 partitions = 7 agents → SG-1 INJ, wait and verify → SG-1 NAV,
+   wait and verify → SG-1 LOG, wait and verify → SG-2 INJ/NAV/LOG in the same
+   sequence → sink-driven, wait and verify.
 
    - **Normal partitions**: one agent per class group (3 agents per partition).
-   - **SEQUENTIAL-FALLBACK partitions**: process sequentially in the orchestrator's
-     context, but iterate through class groups for each entry point group.
+   - **SEQUENTIAL-FALLBACK partitions**: dispatch `vulnhunt-worker` agents one at
+     a time, iterating through class groups for each entry point group.
 
 3. **After all agents return**, run the aggregation procedure (see Results
    Aggregation below).
@@ -131,7 +133,7 @@ prompts.
 
 ### Sink-Driven Audit Agent
 
-In parallel with trace agents, spawn one additional agent that performs
+After the trace agents finish, spawn one additional agent that performs
 **backward-trace audits from dangerous sinks**. This catches findings that
 input-forward tracing misses — over-permissioning, missing response-type
 branching, and authorization gate logic errors.
@@ -246,15 +248,17 @@ the orchestrator merges them:
 ### Fallback: Sequential Processing with Checkpointing
 
 When a partition is marked `SEQUENTIAL-FALLBACK` (too large to parallelize
-effectively), the orchestrator processes it directly instead of spawning agents:
+effectively), dispatch one `vulnhunt-worker` at a time instead of processing it
+in the orchestrator context:
 
 1. Group the partition's inputs by entry point.
 2. For each entry point group, iterate through class groups (INJ, NAV, LOG),
-   tracing all inputs against that class group's vulnerability classes.
+   dispatching a separate `vulnhunt-worker` to trace all inputs against that
+   class group's vulnerability classes. Wait for each worker before dispatching
+   the next one.
 3. After completing each entry point × class group, save intermediate candidates to
    `${VULNHUNT_DIR}/candidates/sg-N_entrypoint_classgroup.md` before proceeding.
 4. This limits context accumulation — each pass starts with only one class group's
    gate definitions and its own inputs in active context.
 5. After all entry point groups are processed, collect all saved candidates
    and merge them into the main aggregation flow.
-

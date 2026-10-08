@@ -10,6 +10,12 @@ Modern software supply chains are deeply interconnected. A single vulnerability 
 
 Developed internally at Capital One, VulnHunter is released to the community because no single organization can solve this challenge alone.
 
+> [!NOTE]
+> **Armor1 OpenCode fork:** the core `vulnhunt/` SAST scanner is ported to
+> OpenCode and runs as a static, no-Bash workflow. The remediation skill,
+> fix verifier, Python headless agent, and benchmark harness remain upstream
+> Claude-specific components and are not required for Armor1 Boundary SAST.
+
 ----
 
 > [!WARNING]
@@ -20,8 +26,8 @@ Developed internally at Capital One, VulnHunter is released to the community bec
 
 > [!IMPORTANT]
 > **Prerequisites & Model Requirements**
-> Built and optimized for **Claude Opus** running in **[Claude Code](https://docs.claude.com/en/docs/claude-code)**. 
-> The framework depends on deep, multi-step reasoning and requires frontier Opus-class models. **You supply your own model access.**
+> The core scanner runs on **OpenCode 1.18.31 or later** and is model-provider
+> agnostic. A configured model provider is required; model access is not included.
 
 ---
 
@@ -35,11 +41,12 @@ Developed internally at Capital One, VulnHunter is released to the community bec
 
 ## The Closed Loop: Hunt → Fix → Verify
 
-VulnHunter ships as three composable [Claude Code](https://docs.claude.com/en/docs/claude-code) skills that form a complete, automated remediation loop:
+VulnHunter originated as three composable Claude Code skills. In this fork the
+Hunt scanner is OpenCode-native; Fix and Verify remain Claude-specific:
 
 | Skill | Phase | Core Responsibility |
 | :--- | :--- | :--- |
-| **`/vulnhunt`** | **Hunt** | Maps entry points to dangerous sinks. Filters findings through a multi-stage falsification pipeline (Recon → Parallel Hunt → Adversarial Disprove → Capability Filter). Emits only verified issues with an executable exploit and a proposed fix. |
+| **`vulnhunt`** | **Hunt** | OpenCode-native static SAST. Maps entry points to dangerous sinks and emits evidence-backed findings with exploit-test source and proposed fixes. |
 | **`/vulnhunter-fix`** | **Fix** | Developer-led, test-driven remediation. It writes an exploit demo, creates a failing security test (**RED**), implements the code fix (**GREEN**), verifies the exploit is blocked without regressions, and cuts a reviewable PR. |
 | **`/vulnhunt-fix-verify`** | **Verify** | A completely separate, read-only agent that independently validates whether a finding was successfully remediated. It emits a per-finding verdict so fixes are proven, not taken on faith. |
 
@@ -66,7 +73,9 @@ Each component is organized into a self-contained subtree:
 ## Requirements & Setup
 
 ### Prerequisites
-* [Claude Code CLI](https://docs.claude.com/en/docs/claude-code), authenticated with access to **Claude Opus**.
+* OpenCode 1.18.31 or later for the core scanner.
+* Claude Code is still required only for the unported fixer, verifier, headless
+  agent, and benchmark harness.
 * Python 3.12+ (Required only for the runtime agent and the benchmarking harness).
 * *Responsibility Check:* Ensure you are only scanning code bases you are explicitly authorized to analyze.
 
@@ -74,42 +83,38 @@ Each component is organized into a self-contained subtree:
 
 ```bash
 # Clone the repository
-git clone https://github.com/capitalone/vulnhunter.git
-cd vulnhunter
+git clone https://github.com/Armor1AI/VulnHunter.git
+cd VulnHunter
 
-# Copy skills into ~/.claude/skills/
-./install.sh      
+# Install the OpenCode scanner, command, and restricted agents
+./install-opencode.sh
 
-# (Optional) To clean up or remove installed skills
-# ./uninstall.sh    
+# Remove the installed OpenCode scanner assets
+./uninstall-opencode.sh
 ```
 
-On Windows, use the `.cmd` equivalents from a `cmd.exe` or PowerShell prompt:
+On Windows, use the equivalent `.cmd` scripts:
 
 ```bat
-git clone https://github.com/capitalone/vulnhunter.git
-cd vulnhunter
-
-REM Copy skills into %USERPROFILE%\.claude\skills\
-.\install.cmd
-
-REM (Optional) To clean up or remove installed skills
-REM .\uninstall.cmd
+git clone https://github.com/Armor1AI/VulnHunter.git
+cd VulnHunter
+install-opencode.cmd
+uninstall-opencode.cmd
 ```
 
 > [!NOTE]
-> `install.sh`/`install.cmd` copy files directly (rather than symlinking) because symlinks can break `find`/`glob` functionality inside subagents. Re-run the install script after pulling updates to refresh your local environment.
+> The OpenCode installers copy files directly rather than creating symlinks.
+> Re-run the installer after pulling updates to refresh your local environment.
 
 ---
 
 ## Usage Guide
 
-### 1. Run the Scanner
+### 1. Run the Scanner with OpenCode
 ```bash
-claude --model opus --add-dir ~/.claude/skills/vulnhunt --add-dir ~/.claude/skills/vulnhunt/phases
-
-# Inside the Claude Code session, invoke:
-/vulnhunt
+OPENCODE_CONFIG="$HOME/.config/opencode/vulnhunt.static.json" \
+  opencode run --agent vulnhunt-orchestrator \
+  "Load the vulnhunt skill and follow it exactly. Scan the current repository. Perform a static, no-Bash audit."
 ```
 
 ### 2. Run the Fixer

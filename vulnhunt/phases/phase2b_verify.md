@@ -129,7 +129,7 @@ if ALL N are server-controlled.
 **SAFE spot-check:** For each subgraph, re-verify Gate 2b on the 2-3 SAFE
 inputs closest to dangerous sinks (URL construction, redirects, template
 rendering, outbound identity/audit headers, rate-limit/auth gating logic)
-with a fresh Read/Grep call.
+with a fresh `read`/`grep` call.
 
 **Sink-coverage gap check:** After verification, grep for redirect sinks
 (sendRedirect, response.redirect, Location header, res.redirect, window.location)
@@ -179,7 +179,8 @@ by prose (code comments, naming, docs) rather than verified code behavior:
 | "ALB authenticates" / "infrastructure handles auth" / "pre-authenticated traffic" / `/protected/` path / Swagger Bearer definition | Resource ID gate (a) / Gate 0 for IDOR |
 | "admin endpoint" / "management API" / "internal tool" / purpose implies restricted access | Gate 0 — endpoint naming is not proof of access control; cite enforcement code at file:line |
 
-If any gate was satisfied by prose, re-verify it empirically.
+If any gate was satisfied by prose, re-verify it from production source or
+other repository evidence.
 
 #### 8. Authorization Delegation Rule (CWE-639 severity adjustment)
 

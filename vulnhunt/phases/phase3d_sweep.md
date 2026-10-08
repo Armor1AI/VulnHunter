@@ -36,7 +36,7 @@ were collapsed — expand them into separate entries before proceeding.
    The source pattern catches instances where the same construction feeds a
    different sink than the original finding.
 
-2. Use the **Grep tool** to search the entire codebase for both patterns. Use the
+2. Use the **`grep` tool** to search the entire codebase for both patterns. Use the
    `glob` parameter to target the relevant file extensions.
 
 3. **Trace callers transitively.** For each instance found, grep for all modules
@@ -107,8 +107,8 @@ For EVERY instance found by the sweep grep, triage it:
 
 Every CANDIDATE instance must go through the full finding pipeline — gates, PoC,
 and exploit test (Phases 2b, 3a, 3b) — the same as any finding discovered during
-hunting. A sweep instance is not confirmed until it has its own exploit test with
-a PASS result. Do NOT assume an instance is exploitable because it shares a root
+hunting. A sweep instance is not confirmed until it has its own exploit-test
+source and a STATIC-CONFIRMED trace. Do NOT assume an instance is exploitable because it shares a root
 cause with a confirmed finding — different call sites may have different data flows,
 different upstream validation, or different sink behavior.
 
@@ -131,4 +131,4 @@ For each CANDIDATE instance found during the sweep, apply the full pipeline:
 2. **PoC** (Phase 3a format) — save to `${VULNHUNT_DIR}/poc/VULN-NNN_description.md`
 3. **Exploit Test** (Phase 3b format) — save to `${VULNHUNT_DIR}/exploit_tests/test_vuln_NNN.*`
 
-Only instances with PASS exploit test results become VULN-NNN findings.
+Only instances with STATIC-CONFIRMED results become VULN-NNN findings.

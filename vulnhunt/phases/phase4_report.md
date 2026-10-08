@@ -9,14 +9,21 @@
 scan time. The audit does not modify source files.
 
 **Each confirmed instance is a separate finding.** If the sweep produced 5 candidates
-for the same root cause and 3 passed the full pipeline, the report contains 3
+for the same root cause and 3 are STATIC-CONFIRMED by the full pipeline, the report contains 3
 VULN-NNN entries — one per sink location, each with its own data flow, PoC, and
 exploit test. They may share a root cause description and fix strategy, but each
 gets its own ID and its own row in the summary table.
 
 Start the report with a summary table of all confirmed findings.
-**This table MUST have one row per exploit test PASS — not one row per root cause.**
+**This table MUST have one row per STATIC-CONFIRMED finding — not one row per root cause.**
 If you have 2 root causes but 8 confirmed sink locations, the table has 8 rows.
+
+**Severity is immutable at this stage.** Copy each finding's exact severity from
+the Phase 3 assignment table. Do not reclassify or normalize it; in particular,
+`High+` must remain `High+` in the summary count, summary row, and finding detail.
+The header must contain exactly one `Findings Summary` line, computed directly
+from those Phase 3 severities. Do not emit a draft, alternative count, qualifier,
+or correction before or after it.
 
 **Universal Auth Gap exception**: if Phase 2b §9 emitted
 `VULN-PLATFORM-AUTHN` or `VULN-PLATFORM-AUTHZ`, that row leads the
@@ -27,9 +34,9 @@ NOT get their own summary-table rows.
 
 ### Summary
 
-| ID | Title | CWE | Severity | Exploit Test | Status |
+| ID | Title | CWE | Severity | Evidence | Status |
 |---|---|---|---|---|---|
-| VULN-001 | [title] | CWE-XXX | High+/High/Medium/Low/Informational | PASS/FAIL | Confirmed/Fixed/Verified |
+| VULN-001 | [title] | CWE-XXX | High+/High/Medium/Low/Informational | [PoC](poc/VULN-001_description.md) \| [Test](exploit_tests/test_vuln_001_description.py) — NOT RUN (static evidence) | Confirmed |
 | ... | ... | ... | ... | ... | ... |
 
 Then for each finding, provide the full detail:
@@ -44,8 +51,8 @@ Then for each finding, provide the full detail:
 | **Location** | file:line (primary instance) |
 | **Entry Point** | ... |
 | **Data Flow** | source -> ... -> sink |
-| **PoC** | `${VULNHUNT_DIR}/poc/VULN-NNN_description.md` |
-| **Exploit Test** | `${VULNHUNT_DIR}/exploit_tests/test_vuln_NNN.py` — PASS/FAIL + reason |
+| **PoC** | [PoC](poc/VULN-NNN_description.md) |
+| **Exploit Test** | [Test](exploit_tests/test_vuln_NNN.py) — NOT RUN; include STATIC-CONFIRMED rationale |
 | **Fix** | [inline diff or link] |
 | **Root Cause** | [shared root cause name, if this instance is part of a sweep group] |
 | **Status** | Confirmed / Fixed / Verified |
@@ -68,8 +75,8 @@ vulnerability findings under a "Code Quality / Defense in Depth" heading.
 
 **Each code smell MUST include a downgrade rationale** explaining:
 1. Which gate it failed or which exploit test defense blocked it
-2. The specific evidence (file:line of the mitigation, or the test output showing
-   the attack was blocked)
+2. The specific evidence (file:line of the mitigation and the static test trace
+   showing where the attack is blocked)
 3. What condition would need to change for this to become exploitable (e.g.,
    "if the allowlist is removed," "if this route is exposed in production,"
    "if the downstream service stops validating")
@@ -119,6 +126,11 @@ ${VULNHUNT_DIR}/
 
 After all findings are finalized, create `${VULNHUNT_DIR}/README.md` as the entry point.
 
+**File creation is mandatory.** Use OpenCode's file-writing tool to create
+`${VULNHUNT_DIR}/README.md`; do not print the report body as the chat response.
+Then read the beginning of that path and verify the required header. Retry the
+write if verification fails. The scan is incomplete until verification succeeds.
+
 **The README MUST begin with this exact header structure** (fill in values):
 
 ```markdown
@@ -134,7 +146,7 @@ After all findings are finalized, create `${VULNHUNT_DIR}/README.md` as the entr
 
 Field definitions:
 - **Run ID** = basename of `VULNHUNT_DIR` (the results folder name, e.g.
-  `smartops-cli_VULNHUNT_RESULTS_opus46_1m_2026-05-14-072642`).
+  `smartops-cli_VULNHUNT_RESULTS_2026-05-14-072642`).
 - **Repository** = the `Repository URL` value supplied in the /vulnhunt
   kickoff prompt's pre-resolved metadata block. The agent layer already
   normalized SSH origins to https and stripped any `.git` suffix; use the
@@ -142,7 +154,8 @@ Field definitions:
 - **Branch** = the `VULNHUNT_BRANCH` value supplied in the same metadata
   block. Format: `branch-name [abc1234]`, or `unknown` if the source
   isn't a git repo. Do not run git to recompute.
-- **Model** = the model used (e.g. `claude-opus-4-8`).
+- **Model** = the OpenCode `provider/model` identifier supplied by the caller,
+  or `unknown` when the Boundary model broker intentionally hides it.
 
 After the header, include:
 - Summary table of findings (ID, title, severity, CWE, status)
@@ -155,8 +168,13 @@ After the header, include:
 **Clickable links**: Every finding row in the summary table and every finding section
 MUST include relative markdown links to the corresponding PoC file (`poc/VULN-NNN_*.md`)
 and exploit test file (`exploit_tests/test_vuln_NNN_*`). Use the format
-`[PoC](poc/VULN-001_desc.md) | [Test](exploit_tests/test_vuln_001_desc.py)`.
+`[PoC](poc/VULN-001_desc.md) \| [Test](exploit_tests/test_vuln_001_desc.py)`.
 A finding without clickable links to both artifacts is incomplete.
+
+Before composing the README, read the `poc/` and `exploit_tests/` directory
+listings and copy artifact filenames exactly; never derive or shorten them. In
+Markdown tables, escape the separator between the PoC and test links as `\|` so
+both links remain in the single Evidence cell.
 
 **Cross-check**: The README summary table MUST list every VULN-NNN from the report.
 Count the findings in the report and count the rows in the README table — they must
@@ -164,6 +182,10 @@ match. If they don't, you missed findings when generating the README.
 
 After writing the README, add a footer to each PoC file linking to its exploit test
 and back to the README.
+
+Finally, read every local artifact path linked by the README. If any read fails,
+correct the link and repeat the check. Do not report completion with unresolved
+links or a summary row whose number of cells differs from its header.
 
 ## What NOT to Report
 

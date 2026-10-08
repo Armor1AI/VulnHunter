@@ -20,15 +20,16 @@ etc.):
 ## Pre-Phase 3 Completeness Check (MANDATORY)
 
 Before writing any PoC, produce a VULN-NNN assignment table mapping every
-CONFIRMED finding from Phase 2b (High and Medium severity) to a sequential ID:
+CONFIRMED finding from Phase 2b (High+, High, and Medium severity) to a sequential ID:
 
 | VULN-NNN | Phase 2b # | Title | Severity |
 |---|---|---|---|
 
-Row count MUST equal the total High + Medium CONFIRMED findings in Phase 2b.
+Row count MUST equal the total High+ + High + Medium CONFIRMED findings in Phase 2b.
 If fewer: you dropped findings — add them. Every row MUST receive a PoC and
-exploit test by end of phase. A CONFIRMED finding cannot be removed without an
-explicit FAIL verdict from its exploit test.
+exploit-test source by end of phase. A CONFIRMED finding cannot be removed
+without a documented static trace showing the exact defense or type constraint
+that invalidates it.
 
 ## Phase 3a: Reproduce
 
@@ -41,13 +42,12 @@ format based on context:
 > tests for `SUBSUMED-BY: VULN-PLATFORM-*` findings — the platform
 > PoC stands in.
 
-#### Runnable PoC (when a test environment is available)
+#### Runnable PoC source (documentation only)
 
-The runnable form below is **only usable when the kickoff prompt says
-"Bash is AVAILABLE for exploit-test execution"** (i.e. the operator
-passed `--no-read-only --enable-bash`). Otherwise produce only the
-Static Data Flow Trace form further down — the model has no Bash tool
-to invoke it and the runnable script is illustrative only.
+VulnHunter's OpenCode workflow is static and has no `bash` permission. You may
+write runnable PoC or exploit-test source as evidence, but you MUST NOT execute
+it. Every confirmation must therefore also include the Static Data Flow Trace
+below; runnable source alone is insufficient evidence.
 
 ```bash
 #!/bin/bash
@@ -106,12 +106,13 @@ After writing each PoC:
 
 ---
 
-## Phase 3b: Exploit Test (MANDATORY — DO NOT SKIP)
+## Phase 3b: Static Exploit-Test Construction (MANDATORY — DO NOT SKIP)
 
-For each reproduced vulnerability, write an **executable test case** that proves the
-exploit works END TO END. Static PoCs can be wrong — framework interceptors, type
-coercion, or runtime guards may block the exploit. A passing test removes all doubt.
-If you cannot write a test that demonstrates the attack succeeding, downgrade the finding.
+For each reproduced vulnerability, write **executable test source** that would
+prove the exploit end to end in a trusted test environment. Do not run it in
+this workflow. Statically trace every setup, action, assertion, interceptor,
+type conversion, and runtime guard needed by the test. If the source cannot
+assert the attacker's concrete goal, downgrade the finding.
 
 ### What "Succeeds" Means
 
@@ -137,8 +138,9 @@ exists. Ask: does the attacker actually get what they want?
 For vulnerability classes not listed above, define what the attacker concretely
 gains and assert on that outcome — the principle is the same.
 
-A test that proves "the vulnerable code path runs" but the attack is blocked by
-downstream defenses is a **FAIL**, not a PASS. Classify it as a code smell.
+A test whose static trace reaches vulnerable code but then encounters a verified
+downstream defense is **STATIC-MITIGATED**, not STATIC-CONFIRMED. Classify it as
+a code smell.
 
 ### What to Write
 
@@ -191,17 +193,14 @@ Adapt the pattern for command injection (assert command executed), deserializati
 
 ### Test Outcomes and Actions
 
-After running (or mentally executing) each test:
+After constructing and statically tracing each test:
 
 | Test Result | Action |
 |---|---|
-| **PASS** (attacker's goal achieved) | Finding confirmed at current severity. Proceed to Phase 3c (Proposed Fixes). |
-| **CODE RUNS but attack mitigated** | Downstream defenses block the exploit. Classify as **Code Smell** — report separately, not as a vulnerability. |
-| **FAIL** (exploit blocked) | Investigate WHY. Read the code path the test actually hit. |
-| **FAIL: framework prevents** | Downgrade to **Code Smell** — document the pattern but note the mitigation. |
-| **FAIL: type system prevents** | Eliminate — the type system makes the payload impossible. |
-| **FAIL: can't construct test** | Downgrade to **Potential** — explain what conditions would need to be true. Do NOT report as Confirmed. |
-| **FAIL: exception before sink** | Check if the exception itself leaks info. If not, eliminate. |
+| **STATIC-CONFIRMED** | Source-to-sink trace is complete, the test assertion proves the attacker's goal, and no verified defense blocks it. Proceed to Phase 3c. |
+| **STATIC-MITIGATED** | A concrete downstream defense blocks the exploit. Classify as **Code Smell** and cite the defense at file:line. |
+| **STATIC-IMPOSSIBLE** | A verified framework or type-system constraint makes the payload impossible. Eliminate it. |
+| **STATIC-INCOMPLETE** | The test or required path cannot be constructed from repository evidence. Downgrade to **Potential** and state the missing condition. |
 
 **"Code Smell" means**: the code pattern is risky and should be fixed for defense
 in depth, but the attacker cannot currently exploit it. Report these in a separate
@@ -218,8 +217,8 @@ reveals impact that abstract reasoning missed — this is the entire point.
 You must show:
 1. The exact payload you would send
 2. The exact code path it would take
-3. The specific defense that blocks it (with file:line and empirically verified
-   behavior — see Gate 2b in phase2_shared.md; for full sanitizer verification
+3. The specific defense that blocks it (with file:line and behavior verified
+   from repository evidence — see Gate 2b in phase2_shared.md; for full sanitizer verification
    methodology, see phase2_class_{class}.md for the relevant class)
 4. Why the defense is effective for this specific sink context
 
@@ -243,10 +242,10 @@ Present this table before proceeding to fixes:
 
 | Finding | Test | Result | Action |
 |---|---|---|---|
-| VULN-001 | test_vuln_001_sql_injection | PASS — payload reaches query | Confirmed, proceed to fix |
-| VULN-002 | test_vuln_002_class_load | FAIL — constructor sig mismatch | Downgrade to Informational |
+| VULN-001 | test_vuln_001_sql_injection | STATIC-CONFIRMED — payload reaches query and assertion proves unauthorized access | Confirmed, proceed to fix |
+| VULN-002 | test_vuln_002_class_load | STATIC-IMPOSSIBLE — constructor signature rejects payload | Eliminate |
 
-**Only findings with PASS results proceed to Phase 3c.**
+**Only findings with STATIC-CONFIRMED results proceed to Phase 3c.**
 
 ### Where to Put the Tests
 

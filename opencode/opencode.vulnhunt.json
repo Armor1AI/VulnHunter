@@ -1,0 +1,25 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [],
+  "mcp": {},
+  "permission": {
+    "bash": "deny",
+    "webfetch": "deny",
+    "websearch": "deny",
+    "lsp": "deny",
+    "question": "deny",
+    "external_directory": {
+      "*": "deny",
+      "~/.config/opencode/skills/vulnhunt/**": "allow"
+    },
+    "edit": {
+      "*": "deny",
+      "*_VULNHUNT_RESULTS_*/**": "allow",
+      "**/*_VULNHUNT_RESULTS_*/**": "allow"
+    },
+    "task": {
+      "*": "deny",
+      "vulnhunt-worker": "allow"
+    }
+  }
+}

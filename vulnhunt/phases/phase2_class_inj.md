@@ -118,22 +118,22 @@ to the detected stack.
 For injection-class findings, apply this expanded procedure in addition to the
 generic Gate 2b in the shared file:
 
-- **Empirically verify what the sanitizer does.** For EVERY sanitizer in the
+- **Statically verify what the sanitizer does.** For EVERY sanitizer in the
   data flow, you MUST do one of:
 
   **(a) Read the sanitizer's source code** (in node_modules, vendor, stdlib, or
   the project's own code) and list the exact characters/patterns it transforms.
   If the source is minified or unavailable, use option (b).
 
-  **(b) Construct a test expression** that proves the sanitizer's behavior on
-  attack-relevant characters for the sink context. For URL sinks, test: `&`, `=`,
-  `?`, `/`, `..`, `#`, `%`. For SQL sinks, test: `'`, `"`, `;`, `--`. For command
-  sinks, test: `;`, `|`, `&`, `` ` ``, `$()`. For HTML sinks, test: `<`, `>`,
-  `"`, `'`, `&`. Write the test as a runnable one-liner, e.g.:
-  `node -e "const xss = require('xss'); console.log(xss('X&injected=true'))"`
+  **(b) Read repository-pinned documentation or type contracts** that explicitly
+  specify behavior for the attack-relevant characters in this sink context. For
+  URL sinks verify `&`, `=`, `?`, `/`, `..`, `#`, `%`; for SQL verify `'`, `"`,
+  `;`, `--`; for command sinks verify `;`, `|`, `&`, backticks, `$()`; for HTML
+  verify `<`, `>`, `"`, `'`, `&`. Generic claims such as "sanitizes input" are
+  not sufficient.
 
-  **(c) If you cannot read the source or construct a test** (e.g., the dependency
-  isn't installed, or the language has no REPL), state this explicitly and
+  **(c) If neither source nor an explicit repository-pinned contract is
+  available**, state this explicitly and
   **treat the sanitizer as ineffective** — do NOT assume it works. Proceed to
   Gate 3 with the finding intact.
 
