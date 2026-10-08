@@ -132,11 +132,15 @@ class OpenCodePortTests(unittest.TestCase):
             (source / "opencode.json").write_text('{"plugin":["target-plugin"]}\n')
             (source / "app.py").write_text("print('target')\n")
             (source / ".gitattributes").write_text("app.py export-ignore\n")
+            for ignore_name in (".gitignore", ".ignore", ".rgignore"):
+                (source / ignore_name).write_text("app.py\n")
             (source / "src").mkdir()
             (source / "src/app.py").write_text("print('nested')\n")
             (source / "src/.gitattributes").write_text("app.py export-ignore\n")
+            for ignore_name in (".gitignore", ".ignore", ".rgignore"):
+                (source / "src" / ignore_name).write_text("app.py\n")
             os.symlink("app.py", source / "linked.py")
-            subprocess.run(["git", "add", "."], cwd=source, check=True)
+            subprocess.run(["git", "add", "-f", "."], cwd=source, check=True)
             subprocess.run(
                 ["git", "commit", "-q", "-m", "fixture"], cwd=source, check=True
             )
@@ -174,8 +178,12 @@ assert not (workspace / "AGENTS.md").exists()
 assert not (workspace / "CLAUDE.md").exists()
 assert not (workspace / ".github/copilot-instructions.md").exists()
 assert not (workspace / ".gitattributes").exists()
+for ignore_name in (".gitignore", ".ignore", ".rgignore"):
+    assert not (workspace / ignore_name).exists()
 assert (workspace / "app.py").read_text() == "print('target')\\n"
 assert not (workspace / "src/.gitattributes").exists()
+for ignore_name in (".gitignore", ".ignore", ".rgignore"):
+    assert not (workspace / "src" / ignore_name).exists()
 assert (workspace / "src/app.py").read_text() == "print('nested')\\n"
 assert not (workspace / "linked.py").is_symlink()
 assert (workspace / "linked.py").read_text() == "symlink target: app.py\\n"
@@ -184,6 +192,8 @@ assert os.environ["XDG_CONFIG_HOME"] != os.environ["AMBIENT_XDG"]
 assert os.environ["HOME"] != os.environ["AMBIENT_HOME"]
 assert os.environ["OPENCODE_DISABLE_CLAUDE_CODE"] == "1"
 assert os.environ["OPENCODE_DISABLE_EXTERNAL_SKILLS"] == "1"
+assert os.environ["RIPGREP_CONFIG_PATH"] != os.environ["AMBIENT_RIPGREP_CONFIG"]
+assert Path(os.environ["RIPGREP_CONFIG_PATH"]).read_text() == ""
 profile = json.loads(os.environ["OPENCODE_CONFIG_CONTENT"])
 assert profile["permission"]["*"] == "deny"
 match = re.search(r"VULNHUNT_DIR: (.+)", sys.argv[-1])
@@ -218,6 +228,10 @@ for artifact in ("phase2b_output.md", "phase3_output.md", "phase3d_output.md", "
             env["XDG_CONFIG_HOME"] = str(ambient_xdg)
             env["AMBIENT_XDG"] = str(ambient_xdg)
             env["AMBIENT_HOME"] = env["HOME"]
+            ambient_ripgrep = root / "ambient-ripgreprc"
+            ambient_ripgrep.write_text("--glob=!app.py\n")
+            env["RIPGREP_CONFIG_PATH"] = str(ambient_ripgrep)
+            env["AMBIENT_RIPGREP_CONFIG"] = str(ambient_ripgrep)
             completed = subprocess.run(
                 [str(REPO / "run-opencode.sh"), str(source)],
                 cwd=REPO,

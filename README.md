@@ -114,10 +114,10 @@ uninstall-opencode.cmd
 
 Run scans through the isolated launcher. It materializes every in-scope
 committed Git blob without applying target `export-ignore` attributes. It
-excludes target OpenCode and compatible agent/skill configuration, converts
-symlinks to inert link-target text, and uses a temporary config home. Set
-`OPENCODE_CONFIG` to a trusted model-only provider config; the isolated run does
-not use your normal login.
+excludes target search-ignore rules plus OpenCode and compatible agent/skill
+configuration, converts symlinks to inert link-target text, and uses a temporary
+config home. Set `OPENCODE_CONFIG` to a trusted model-only provider config; the
+isolated run does not use your normal login.
 
 ```bash
 ./run-opencode.sh /path/to/repository

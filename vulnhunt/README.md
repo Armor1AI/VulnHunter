@@ -37,11 +37,11 @@ launcher:
 ```
 
 The launcher ignores target `export-ignore` attributes, excludes target
-OpenCode and compatible agent/skill configuration, converts symlinks to inert
-link-target text, and uses an isolated config home. This prevents startup
-plugins and skills from the target or user config from loading before scanner
-permissions apply. It rejects submodules
-and Git LFS pointers because their contents are outside the committed tree.
+search-ignore rules plus OpenCode and compatible agent/skill configuration,
+converts symlinks to inert link-target text, and uses an isolated config home.
+This prevents startup plugins and skills from the target or user config from
+loading before scanner permissions apply. It rejects submodules and Git LFS
+pointers because their contents are outside the committed tree.
 Set `OPENCODE_CONFIG` to a trusted model-only provider config.
 
 The scan writes its artifacts to a `*_VULNHUNT_RESULTS_*` directory in the

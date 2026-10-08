@@ -36,8 +36,10 @@ SAFE_CONFIG="$WORKSPACE/.opencode"
 SNAPSHOT_GIT="$WORK_ROOT/snapshot.git"
 SNAPSHOT_INDEX="$WORK_ROOT/index"
 SNAPSHOT_WORK="$WORK_ROOT/snapshot-work"
+RIPGREP_CONFIG="$WORK_ROOT/empty-ripgreprc"
 mkdir -p "$WORKSPACE" "$SAFE_CONFIG/agents" "$SAFE_CONFIG/commands" \
     "$SAFE_CONFIG/skills" "$WORK_ROOT/home" "$WORK_ROOT/xdg" "$SNAPSHOT_WORK"
+: > "$RIPGREP_CONFIG"
 
 COMMIT=$(git -C "$SOURCE_ROOT" rev-parse HEAD)
 git clone --bare --shared -q "$SOURCE_ROOT" "$SNAPSHOT_GIT"
@@ -55,6 +57,9 @@ fi
 
 git ls-files -z -- \
     '.gitattributes' ':(glob)**/.gitattributes' \
+    '.gitignore' ':(glob)**/.gitignore' \
+    '.ignore' ':(glob)**/.ignore' \
+    '.rgignore' ':(glob)**/.rgignore' \
     'AGENTS.md' ':(glob)**/AGENTS.md' \
     'CLAUDE.md' ':(glob)**/CLAUDE.md' \
     '.github/copilot-instructions.md' \
@@ -152,6 +157,7 @@ set +e
     OPENCODE_DISABLE_EXTERNAL_SKILLS=1 \
     OPENCODE_DISABLE_PROJECT_CONFIG=true \
     OPENCODE_DISABLE_DEFAULT_PLUGINS=true \
+    RIPGREP_CONFIG_PATH="$RIPGREP_CONFIG" \
     "$OPENCODE_BIN" "$@"
 )
 STATUS=$?
