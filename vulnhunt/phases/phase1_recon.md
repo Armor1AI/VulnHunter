@@ -488,6 +488,10 @@ build output may be stale or overwritten by a mock variant during test runs.
 
 Produce a compact Attack Surface Report (not the raw tool output):
 
+The first line must be exactly `PARTITION_COUNT: N`, where `N` is the number of
+rows in the Subgraph Partitions table. Use `PARTITION_COUNT: 0` when the input
+inventory is empty and no partitions are needed.
+
 **Languages**: [detected languages]
 **Frameworks**: [detected frameworks and versions if visible]
 **Input Inventory**: [total count] inputs across [count] entry points

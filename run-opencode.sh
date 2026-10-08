@@ -55,6 +55,10 @@ fi
 
 git ls-files -z -- \
     '.gitattributes' ':(glob)**/.gitattributes' \
+    'AGENTS.md' ':(glob)**/AGENTS.md' \
+    'CLAUDE.md' ':(glob)**/CLAUDE.md' \
+    '.github/copilot-instructions.md' \
+    '.agents' '.agents/**' '.claude' '.claude/**' \
     '.opencode' '.opencode/**' 'opencode.json' 'opencode.jsonc' \
     > "$WORK_ROOT/excluded-paths"
 git update-index --force-remove -z --stdin < "$WORK_ROOT/excluded-paths"
@@ -131,6 +135,8 @@ set +e
     OPENCODE_CONFIG_DIR="$SAFE_CONFIG" \
     OPENCODE_CONFIG_CONTENT="$(cat "$SCRIPT_DIR/opencode/opencode.vulnhunt.json")" \
     OPENCODE_DISABLE_AUTOUPDATE=true \
+    OPENCODE_DISABLE_CLAUDE_CODE=1 \
+    OPENCODE_DISABLE_EXTERNAL_SKILLS=1 \
     OPENCODE_DISABLE_PROJECT_CONFIG=true \
     OPENCODE_DISABLE_DEFAULT_PLUGINS=true \
     "$OPENCODE_BIN" "$@"
@@ -143,13 +149,29 @@ if [ "$STATUS" -ne 0 ]; then
     exit "$STATUS"
 fi
 
+PHASE1_OUTPUT="$WORKSPACE/$RESULT_NAME/phase1_output.md"
+IFS= read -r PARTITION_HEADER < "$PHASE1_OUTPUT" || PARTITION_HEADER=
+case "$PARTITION_HEADER" in
+    "PARTITION_COUNT: "*) PARTITION_COUNT=${PARTITION_HEADER#PARTITION_COUNT: } ;;
+    *)
+        echo "error: phase1_output.md must start with PARTITION_COUNT: N" >&2
+        echo "error: scan incomplete; workspace preserved at $WORKSPACE" >&2
+        exit 1
+        ;;
+esac
+case "$PARTITION_COUNT" in
+    ''|*[!0-9]*)
+        echo "error: phase1_output.md has an invalid partition count" >&2
+        echo "error: scan incomplete; workspace preserved at $WORKSPACE" >&2
+        exit 1
+        ;;
+esac
+
 MISSING_OUTPUT=0
+ACTUAL_PARTITIONS=0
 for PARTITION in "$WORKSPACE/$RESULT_NAME"/partitions/sg-*_data.md; do
-    if [ ! -f "$PARTITION" ]; then
-        echo "error: scan did not produce partition data" >&2
-        MISSING_OUTPUT=1
-        break
-    fi
+    [ -f "$PARTITION" ] || continue
+    ACTUAL_PARTITIONS=$((ACTUAL_PARTITIONS + 1))
     PARTITION_ID=${PARTITION##*/sg-}
     PARTITION_ID=${PARTITION_ID%_data.md}
     IFS= read -r REACHABILITY < "$PARTITION" || REACHABILITY=
@@ -170,6 +192,10 @@ for PARTITION in "$WORKSPACE/$RESULT_NAME"/partitions/sg-*_data.md; do
         fi
     done
 done
+if [ "$ACTUAL_PARTITIONS" -ne "$PARTITION_COUNT" ]; then
+    echo "error: expected $PARTITION_COUNT partition files, found $ACTUAL_PARTITIONS" >&2
+    MISSING_OUTPUT=1
+fi
 if [ ! -s "$WORKSPACE/$RESULT_NAME/results/sink_driven_results.md" ]; then
     echo "error: missing scan result: sink_driven_results.md" >&2
     MISSING_OUTPUT=1

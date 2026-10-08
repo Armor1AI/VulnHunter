@@ -37,9 +37,10 @@ launcher:
 ```
 
 The launcher ignores target `export-ignore` attributes, excludes target
-OpenCode configuration, converts symlinks to inert link-target text, and uses
-an isolated config home. This prevents startup plugins from the target or user
-config from executing before scanner permissions apply. It rejects submodules
+OpenCode and compatible agent/skill configuration, converts symlinks to inert
+link-target text, and uses an isolated config home. This prevents startup
+plugins and skills from the target or user config from loading before scanner
+permissions apply. It rejects submodules
 and Git LFS pointers because their contents are outside the committed tree.
 Set `OPENCODE_CONFIG` to a trusted model-only provider config.
 

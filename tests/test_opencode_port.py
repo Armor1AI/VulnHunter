@@ -120,6 +120,15 @@ class OpenCodePortTests(unittest.TestCase):
             plugin = source / ".opencode" / "plugins" / "target.js"
             plugin.parent.mkdir(parents=True)
             plugin.write_text("throw new Error('target plugin loaded')\n")
+            for skill_root in (".agents", ".claude"):
+                skill = source / skill_root / "skills" / "vulnhunt" / "SKILL.md"
+                skill.parent.mkdir(parents=True)
+                skill.write_text("malicious target skill\n")
+            (source / "AGENTS.md").write_text("malicious target instructions\n")
+            (source / "CLAUDE.md").write_text("malicious target instructions\n")
+            copilot = source / ".github" / "copilot-instructions.md"
+            copilot.parent.mkdir()
+            copilot.write_text("malicious target instructions\n")
             (source / "opencode.json").write_text('{"plugin":["target-plugin"]}\n')
             (source / "app.py").write_text("print('target')\n")
             (source / ".gitattributes").write_text("app.py export-ignore\n")
@@ -148,6 +157,11 @@ if sys.argv[1:] == ["run", "--help"]:
 workspace = Path.cwd()
 assert not (workspace / ".opencode/plugins/target.js").exists()
 assert not (workspace / "opencode.json").exists()
+assert not (workspace / ".agents").exists()
+assert not (workspace / ".claude").exists()
+assert not (workspace / "AGENTS.md").exists()
+assert not (workspace / "CLAUDE.md").exists()
+assert not (workspace / ".github/copilot-instructions.md").exists()
 assert not (workspace / ".gitattributes").exists()
 assert (workspace / "app.py").read_text() == "print('target')\\n"
 assert not (workspace / "src/.gitattributes").exists()
@@ -157,19 +171,26 @@ assert (workspace / "linked.py").read_text() == "symlink target: app.py\\n"
 assert Path(os.environ["OPENCODE_CONFIG_DIR"]).resolve() == (workspace / ".opencode").resolve()
 assert os.environ["XDG_CONFIG_HOME"] != os.environ["AMBIENT_XDG"]
 assert os.environ["HOME"] != os.environ["AMBIENT_HOME"]
+assert os.environ["OPENCODE_DISABLE_CLAUDE_CODE"] == "1"
+assert os.environ["OPENCODE_DISABLE_EXTERNAL_SKILLS"] == "1"
 profile = json.loads(os.environ["OPENCODE_CONFIG_CONTENT"])
 assert profile["permission"]["*"] == "deny"
 match = re.search(r"VULNHUNT_DIR: (.+)", sys.argv[-1])
 assert match
 results = Path(match.group(1).strip())
-(results / "partitions").mkdir()
 (results / "results").mkdir()
-(results / "partitions/sg-1_data.md").write_text("REACHABILITY: PRODUCTION\\n")
-(results / "partitions/sg-2_data.md").write_text("REACHABILITY: DEV-ONLY\\n")
-for class_name in ("inj", "nav", "log"):
-    if os.environ.get("OMIT_RESULT") == class_name:
-        continue
-    (results / f"results/sg-1_{class_name}_results.md").write_text("# result\\n")
+if os.environ.get("ZERO_PARTITIONS") == "1":
+    (results / "phase1_output.md").write_text("PARTITION_COUNT: 0\\n")
+else:
+    partition_count = os.environ.get("PARTITION_COUNT_OVERRIDE", "2")
+    (results / "phase1_output.md").write_text(f"PARTITION_COUNT: {partition_count}\\n")
+    (results / "partitions").mkdir()
+    (results / "partitions/sg-1_data.md").write_text("REACHABILITY: PRODUCTION\\n")
+    (results / "partitions/sg-2_data.md").write_text("REACHABILITY: DEV-ONLY\\n")
+    for class_name in ("inj", "nav", "log"):
+        if os.environ.get("OMIT_RESULT") == class_name:
+            continue
+        (results / f"results/sg-1_{class_name}_results.md").write_text("# result\\n")
 (results / "results/sink_driven_results.md").write_text("# result\\n")
 (results / "README.md").write_text("# report\\n")
 """
@@ -208,6 +229,31 @@ for class_name in ("inj", "nav", "log"):
             )
             self.assertEqual(incomplete.returncode, 1)
             self.assertIn("missing scan result: sg-1_nav_results.md", incomplete.stderr)
+
+            env.pop("OMIT_RESULT")
+            env["PARTITION_COUNT_OVERRIDE"] = "3"
+            mismatched = subprocess.run(
+                [str(REPO / "run-opencode.sh"), str(source)],
+                cwd=REPO,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(mismatched.returncode, 1)
+            self.assertIn("expected 3 partition files, found 2", mismatched.stderr)
+
+            env.pop("PARTITION_COUNT_OVERRIDE")
+            env["ZERO_PARTITIONS"] = "1"
+            empty = subprocess.run(
+                [str(REPO / "run-opencode.sh"), str(source)],
+                cwd=REPO,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(empty.returncode, 0, empty.stdout + empty.stderr)
 
     def test_isolated_launcher_rejects_unmaterialized_git_content(self):
         cases = {
@@ -314,6 +360,9 @@ for class_name in ("inj", "nav", "log"):
         self.assertIn("REACHABILITY: DEV-ONLY", phase2)
         self.assertIn("production_partition_count", phase2)
         self.assertIn("production_partition_count", skill)
+        self.assertIn("PARTITION_COUNT: N", skill)
+        phase1 = (REPO / "vulnhunt" / "phases" / "phase1_recon.md").read_text()
+        self.assertIn("PARTITION_COUNT: 0", phase1)
 
     def test_core_scanner_has_no_claude_runtime_contracts(self):
         forbidden = {

@@ -204,14 +204,15 @@ variant. See "Build-Time Code Swapping" in Phase 1 for how to detect this.
    OpenCode's `task` tool:
    > Your scan directory (absolute path) is `${VULNHUNT_DIR}`. Follow the prompt
    > in `${PHASES_DIR}/phase1_recon.md`. Write output to
-   > `${VULNHUNT_DIR}/phase1_output.md`. IMPORTANT: Your return message must
-   > be under 20 words.
+   > `${VULNHUNT_DIR}/phase1_output.md`. Its first line must be exactly
+   > `PARTITION_COUNT: N`. IMPORTANT: Your return message must be under 20 words.
    After it completes, verify `${VULNHUNT_DIR}/phase1_output.md` exists.
    **Do NOT read this file in full.** Read ONLY the partition table and input
    inventory table for dispatch — not the analysis, sink findings, or candidates.
 
    **B. Phase 2 - Hunt (dispatch)**: Read `${PHASES_DIR}/phase2_hunt.md`.
-   Create one `${VULNHUNT_DIR}/partitions/sg-{N}_data.md` file per partition,
+   Create exactly `PARTITION_COUNT` files named
+   `${VULNHUNT_DIR}/partitions/sg-{N}_data.md`, one per partition,
    including the exact reachability header required by `phase2_hunt.md`. Then
    dispatch class-group trace agents for production partitions using that file's
    template. **Minimum agent count = (3 × production_partition_count) + 1
