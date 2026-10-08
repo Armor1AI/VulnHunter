@@ -140,6 +140,19 @@ class OpenCodePortTests(unittest.TestCase):
             copilot.write_text("malicious target instructions\n")
             (source / "OpenCode.json").write_text('{"plugin":["target-plugin"]}\n')
             (source / "app.py").write_text("print('target')\n")
+            trusted_inputs = root / "trusted inputs"
+            trusted_inputs.mkdir()
+            provider_config = trusted_inputs / "provider.json"
+            provider_config.write_text('{"model":"trusted-provider/model"}\n')
+            target_inputs = source / "trusted inputs"
+            target_inputs.mkdir()
+            (target_inputs / "provider.json").write_text(
+                '{"plugin":["target-controlled-plugin"]}\n'
+            )
+            (source / "opencode").write_text(
+                "#!/bin/sh\necho 'target executable selected' >&2\nexit 99\n"
+            )
+            (source / "opencode").chmod(0o755)
             (source / ".GitAttributes").write_text("app.py export-ignore\n")
             for ignore_name in (".GitIgnore", ".Ignore", ".RgIgnore"):
                 (source / ignore_name).write_text("app.py\n")
@@ -180,6 +193,13 @@ from pathlib import Path
 
 scenario_path = Path(__file__).with_name("scenario.json")
 scenario = json.loads(scenario_path.read_text()) if scenario_path.exists() else {}
+
+config = os.environ.get("OPENCODE_CONFIG")
+if not scenario.get("NO_CONFIG"):
+    assert config and Path(config).is_absolute()
+    assert json.loads(Path(config).read_text())["model"] == "trusted-provider/model"
+else:
+    assert not config
 
 if sys.argv[1:] == ["--version"]:
     print("1.18.31")
@@ -317,6 +337,24 @@ if confirmed:
         if scenario.get("OMIT_MANIFEST_FINDING") == "1"
         else f"FINDING_COUNT: 1\\n{finding_id}|{poc}|{test}\\n"
     )
+    if scenario.get("SECOND_TEST"):
+        second_poc = "poc/VULN-002_path_traversal.md"
+        second_test = "exploit_tests/path_traversal.py"
+        (results / second_poc).write_text("# second poc\\n")
+        if scenario["SECOND_TEST"] == "shared":
+            second_test = test
+        elif scenario["SECOND_TEST"] == "hardlink":
+            os.link(results / test, results / second_test)
+        else:
+            (results / second_test).write_text("# independent test\\n")
+        report += (
+            f"| VULN-002 | [PoC]({second_poc}) "
+            f"\\\\| [Test]({second_test}) |\\n"
+        )
+        manifest = (
+            f"FINDING_COUNT: 2\\n{finding_id}|{poc}|{test}\\n"
+            f"VULN-002|{second_poc}|{second_test}\\n"
+        )
 else:
     report = (
         "# VulnHunter Security Audit Report\\n\\n"
@@ -340,6 +378,7 @@ if scenario.get("OMIT_ARTIFACT") != "findings.manifest":
             ambient_xdg = root / "ambient-xdg"
             env = os.environ.copy()
             env["OPENCODE_BIN"] = str(fake_opencode)
+            env["OPENCODE_CONFIG"] = str(provider_config)
             env["XDG_CONFIG_HOME"] = str(ambient_xdg)
             env["AMBIENT_XDG"] = str(ambient_xdg)
             env["AMBIENT_HOME"] = env["HOME"]
@@ -361,12 +400,12 @@ if scenario.get("OMIT_ARTIFACT") != "findings.manifest":
             env["OPENCODE_CLI_CONFIG_CONTENT"] = '{"permission":{"bash":"allow"}}'
             env["OPENAI_API_KEY"] = "must-not-reach-opencode"
 
-            def run_scenario(settings):
+            def run_scenario(settings, overrides=None):
                 scenario.write_text(json.dumps(settings))
                 return subprocess.run(
                     [str(REPO / "run-opencode.sh"), str(source)],
-                    cwd=REPO,
-                    env=env,
+                    cwd=root,
+                    env={**env, **(overrides or {})},
                     check=False,
                     capture_output=True,
                     text=True,
@@ -380,10 +419,51 @@ if scenario.get("OMIT_ARTIFACT") != "findings.manifest":
             self.assertIsNotNone(report)
             self.assertIn("VULN-001", Path(report.group(1)).read_text())
 
+            path_cases = (
+                (
+                    {},
+                    {
+                        "OPENCODE_CONFIG": "trusted inputs/provider.json",
+                        "OPENCODE_BIN": "./opencode",
+                    },
+                ),
+                (
+                    {},
+                    {
+                        "OPENCODE_CONFIG": "./trusted inputs/../trusted inputs/provider.json",
+                        "OPENCODE_BIN": "opencode",
+                        "PATH": "." + os.pathsep + env["PATH"],
+                    },
+                ),
+                ({"NO_CONFIG": True}, {"OPENCODE_CONFIG": ""}),
+            )
+            for settings, overrides in path_cases:
+                with self.subTest(paths=overrides):
+                    resolved = run_scenario(settings, overrides)
+                    self.assertEqual(
+                        resolved.returncode, 0, resolved.stdout + resolved.stderr
+                    )
+            missing_config = run_scenario(
+                {}, {"OPENCODE_CONFIG": "missing-provider.json"}
+            )
+            self.assertEqual(missing_config.returncode, 1)
+            self.assertIn("readable provider config file", missing_config.stderr)
+
+            distinct = run_scenario({"SECOND_TEST": "distinct"})
+            self.assertEqual(distinct.returncode, 0, distinct.stdout + distinct.stderr)
+
             rollup = run_scenario({"PLATFORM_ROLLUP": "1"})
             self.assertEqual(rollup.returncode, 0, rollup.stdout + rollup.stderr)
 
             failure_cases = (
+                (
+                    {"SECOND_TEST": "shared"},
+                    "exploit test reused by VULN-002",
+                ),
+                (
+                    {"SECOND_TEST": "hardlink"},
+                    "exploit test reused by VULN-002",
+                ),
                 ({"OMIT_RESULT": "nav"}, "missing scan result: sg-1_nav_results.md"),
                 (
                     {"PARTITION_COUNT_OVERRIDE": "3"},

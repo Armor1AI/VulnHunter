@@ -204,6 +204,8 @@ VULN-001|poc/VULN-001_sql_injection.md|exploit_tests/test_vuln_001_sql_injection
 Use `FINDING_COUNT: 0` with no additional lines for a clean report. Each entry
 must use the exact relative paths linked by the README. Do not include code
 smells, eliminated candidates, or subsumed findings as separate entries.
+Each final finding must reference its own exploit-test file; do not reuse a
+test file across manifest entries.
 
 ## What NOT to Report
 

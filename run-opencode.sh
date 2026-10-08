@@ -10,10 +10,24 @@ SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 TARGET=${1:-.}
 OPENCODE_BIN=${OPENCODE_BIN:-opencode}
 TRUSTED_OPENCODE_CONFIG=${OPENCODE_CONFIG:-}
+CALLER_DIR=$(pwd -P)
+case "$TRUSTED_OPENCODE_CONFIG" in
+    ''|/*) ;;
+    *) TRUSTED_OPENCODE_CONFIG="$CALLER_DIR/$TRUSTED_OPENCODE_CONFIG" ;;
+esac
+if [ -n "$TRUSTED_OPENCODE_CONFIG" ] && \
+    { [ ! -f "$TRUSTED_OPENCODE_CONFIG" ] || [ ! -r "$TRUSTED_OPENCODE_CONFIG" ]; }; then
+    echo "error: OPENCODE_CONFIG must name a readable provider config file" >&2
+    exit 1
+fi
 
 case "$OPENCODE_BIN" in
     */*) ;;
     *) OPENCODE_BIN=$(command -v "$OPENCODE_BIN" 2>/dev/null || true) ;;
+esac
+case "$OPENCODE_BIN" in
+    ''|/*) ;;
+    *) OPENCODE_BIN="$CALLER_DIR/$OPENCODE_BIN" ;;
 esac
 PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin
 export PATH
@@ -358,6 +372,8 @@ MANIFEST="$RESULT_ROOT/findings.manifest"
 MANIFEST_COUNT=
 ACTUAL_FINDINGS=0
 SEEN_FINDINGS=
+SEEN_TESTS="$WORK_ROOT/exploit-tests"
+: > "$SEEN_TESTS"
 while IFS= read -r MANIFEST_LINE || [ -n "$MANIFEST_LINE" ]; do
     if [ -z "$MANIFEST_COUNT" ]; then
         case "$MANIFEST_LINE" in
@@ -400,6 +416,14 @@ while IFS= read -r MANIFEST_LINE || [ -n "$MANIFEST_LINE" ]; do
     case "${TEST_PATH#exploit_tests/}" in
         ''|*[!A-Za-z0-9._-]*) echo "error: invalid exploit-test path for $FINDING_ID" >&2; MISSING_OUTPUT=1; continue ;;
     esac
+    while IFS= read -r PREVIOUS_TEST; do
+        if [ "$TEST_PATH" = "$PREVIOUS_TEST" ] || \
+            [ "$RESULT_ROOT/$TEST_PATH" -ef "$RESULT_ROOT/$PREVIOUS_TEST" ]; then
+            echo "error: exploit test reused by $FINDING_ID: $TEST_PATH" >&2
+            MISSING_OUTPUT=1
+        fi
+    done < "$SEEN_TESTS"
+    printf '%s\n' "$TEST_PATH" >> "$SEEN_TESTS"
     case "
 $SEEN_FINDINGS" in
         *"
