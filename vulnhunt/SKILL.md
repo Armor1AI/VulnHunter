@@ -211,12 +211,11 @@ variant. See "Build-Time Code Swapping" in Phase 1 for how to detect this.
    inventory table for dispatch — not the analysis, sink findings, or candidates.
 
    **B. Phase 2 - Hunt (dispatch)**: Read `${PHASES_DIR}/phase2_hunt.md`.
-   Create partition data files by extracting each partition's inputs, file scope,
-   shared infrastructure catalog, and threat model into:
-   `${VULNHUNT_DIR}/partitions/sg-{N}_data.md` (one per partition).
-   Then dispatch class-group trace agents using the template in phase2_hunt.md.
-   **Minimum agent count = (3 × partition_count) + 1 sink-driven.**
-   Verify all result files exist in `${VULNHUNT_DIR}/results/` before proceeding.
+   Create one `${VULNHUNT_DIR}/partitions/sg-{N}_data.md` file per partition,
+   including the exact reachability header required by `phase2_hunt.md`. Then
+   dispatch class-group trace agents for production partitions using that file's
+   template. **Minimum agent count = (3 × production_partition_count) + 1
+   sink-driven.** Verify every required production result exists before proceeding.
    Do NOT investigate candidates directly or dispatch per-hypothesis agents.
 
    **C. Phase 2b - Verify (subagent)**: Launch a `vulnhunt-worker` subagent:

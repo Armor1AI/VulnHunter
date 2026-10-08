@@ -36,11 +36,12 @@ launcher:
 ./run-opencode.sh /path/to/repository
 ```
 
-The launcher excludes target OpenCode configuration and symlinks and uses an
-isolated config home. This prevents startup plugins from the target or user
-config from executing before scanner permissions apply. Set `OPENCODE_CONFIG`
-to a trusted model-only provider config; the isolated run does not use your
-normal OpenCode login state.
+The launcher ignores target `export-ignore` attributes, excludes target
+OpenCode configuration, converts symlinks to inert link-target text, and uses
+an isolated config home. This prevents startup plugins from the target or user
+config from executing before scanner permissions apply. It rejects submodules
+and Git LFS pointers because their contents are outside the committed tree.
+Set `OPENCODE_CONFIG` to a trusted model-only provider config.
 
 The scan writes its artifacts to a `*_VULNHUNT_RESULTS_*` directory in the
 isolated workspace (report `README.md`, static PoCs, and exploit-test source).
@@ -74,7 +75,7 @@ it is cached across the parallel dispatch.
 ## Requirements
 
 - OpenCode 1.18.31 or later with a configured model.
-- A clean Git checkout plus `git` and `tar` for the isolated launcher.
+- A clean Git checkout plus `git`, `tar`, and `readlink` for the isolated launcher.
 - Python is not required. The provided agents deny `bash`, network tools, and
   edits outside `*_VULNHUNT_RESULTS_*` directories.
 

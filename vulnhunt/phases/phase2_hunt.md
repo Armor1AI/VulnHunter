@@ -6,7 +6,7 @@
 
 ## Phase 2: Vulnerability Hunting
 
-Phase 2 dispatches **trace agents by class group** — for each subgraph
+Phase 2 dispatches **trace agents by class group** — for each production
 partition from Phase 1, spawn one agent per vulnerability class group (INJ, NAV,
 LOG). Each agent traces ALL inputs in its partition but only evaluates sinks for
 its assigned class group. The orchestrator merges results across class groups and
@@ -21,7 +21,10 @@ For each PRODUCTION partition (e.g., SG-1 with inputs #1-#5):
   → Spawn: "NAV trace agent SG-1" with `phase2_class_nav.md` + inputs #1-#5
   → Spawn: "LOG trace agent SG-1" with `phase2_class_log.md` + inputs #1-#5
 
-Skip DEV-ONLY partitions entirely (already marked SAFE in Phase 1).
+Create `${VULNHUNT_DIR}/partitions/sg-N_data.md` for every partition. Its first
+line must be exactly `REACHABILITY: PRODUCTION` or `REACHABILITY: DEV-ONLY`,
+matching Phase 1. Skip trace agents for DEV-ONLY partitions (already marked SAFE
+in Phase 1).
 Also spawn 1 sink-driven audit agent.
 
 Do NOT dispatch per-candidate, per-hypothesis, or per-finding agents.
@@ -73,7 +76,7 @@ subagent is permitted.
    Aggregation below).
 
    **Dispatch checklist (MANDATORY — verify before proceeding to Phase 2b):**
-   - [ ] All class-group agents for all partitions — spawned and **produced a results file**
+   - [ ] All class-group agents for all production partitions — spawned and **produced a results file**
    - [ ] One sink-driven audit agent — spawned and returned
    - [ ] Results merged per aggregation procedure
    If any agent was not spawned, or spawned but failed/stalled/produced no

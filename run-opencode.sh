@@ -6,12 +6,13 @@ if [ "$#" -gt 1 ]; then
     exit 2
 fi
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 TARGET=${1:-.}
 OPENCODE_BIN=${OPENCODE_BIN:-opencode}
 
 command -v git >/dev/null 2>&1 || { echo "error: git is required" >&2; exit 1; }
 command -v tar >/dev/null 2>&1 || { echo "error: tar is required" >&2; exit 1; }
+command -v readlink >/dev/null 2>&1 || { echo "error: readlink is required" >&2; exit 1; }
 command -v "$OPENCODE_BIN" >/dev/null 2>&1 || {
     echo "error: OpenCode not found: $OPENCODE_BIN" >&2
     exit 1
@@ -29,17 +30,67 @@ fi
 TEMP_BASE=${TMPDIR:-/tmp}
 TEMP_BASE=${TEMP_BASE%/}
 WORK_ROOT_RAW=$(mktemp -d "$TEMP_BASE/vulnhunter-opencode.XXXXXX")
-WORK_ROOT=$(CDPATH= cd -- "$WORK_ROOT_RAW" && pwd -P)
+WORK_ROOT=$(CDPATH='' cd -- "$WORK_ROOT_RAW" && pwd -P)
 WORKSPACE="$WORK_ROOT/repo"
 SAFE_CONFIG="$WORKSPACE/.opencode"
+SNAPSHOT_GIT="$WORK_ROOT/snapshot.git"
+SNAPSHOT_INDEX="$WORK_ROOT/index"
+SNAPSHOT_WORK="$WORK_ROOT/snapshot-work"
 mkdir -p "$WORKSPACE" "$SAFE_CONFIG/agents" "$SAFE_CONFIG/commands" \
-    "$SAFE_CONFIG/skills" "$WORK_ROOT/home" "$WORK_ROOT/xdg"
+    "$SAFE_CONFIG/skills" "$WORK_ROOT/home" "$WORK_ROOT/xdg" "$SNAPSHOT_WORK"
 
-git -C "$SOURCE_ROOT" archive --format=tar HEAD -- . \
-    ':(exclude).opencode' ':(exclude).opencode/**' \
-    ':(exclude)opencode.json' ':(exclude)opencode.jsonc' \
-    | tar -xf - -C "$WORKSPACE"
-find "$WORKSPACE" -type l -exec rm -f -- {} +
+COMMIT=$(git -C "$SOURCE_ROOT" rev-parse HEAD)
+git clone --bare --shared -q "$SOURCE_ROOT" "$SNAPSHOT_GIT"
+
+export GIT_DIR="$SNAPSHOT_GIT"
+export GIT_WORK_TREE="$SNAPSHOT_WORK"
+export GIT_INDEX_FILE="$SNAPSHOT_INDEX"
+git read-tree "$COMMIT"
+
+git ls-files --stage > "$WORK_ROOT/index-entries"
+if grep -q '^160000 ' "$WORK_ROOT/index-entries"; then
+    echo "error: repositories with submodules are not supported" >&2
+    exit 1
+fi
+
+git ls-files -z -- \
+    '.gitattributes' ':(glob)**/.gitattributes' \
+    '.opencode' '.opencode/**' 'opencode.json' 'opencode.jsonc' \
+    > "$WORK_ROOT/excluded-paths"
+git update-index --force-remove -z --stdin < "$WORK_ROOT/excluded-paths"
+SNAPSHOT_TREE=$(git write-tree)
+
+set +e
+git grep -I -l '^version https://git-lfs.github.com/spec/v1$' "$SNAPSHOT_TREE" -- \
+    > "$WORK_ROOT/lfs-pointers"
+LFS_STATUS=$?
+set -e
+case "$LFS_STATUS" in
+    0)
+        echo "error: repositories with Git LFS pointers are not supported" >&2
+        exit 1
+        ;;
+    1) ;;
+    *)
+        echo "error: could not inspect the committed tree for Git LFS pointers" >&2
+        exit 1
+        ;;
+esac
+
+unset GIT_WORK_TREE GIT_INDEX_FILE
+GIT_ATTR_NOSYSTEM=1 git -c core.attributesFile=/dev/null \
+    archive --format=tar --output="$WORK_ROOT/snapshot.tar" "$SNAPSHOT_TREE"
+tar -xf "$WORK_ROOT/snapshot.tar" -C "$WORKSPACE"
+unset GIT_DIR
+
+find "$WORKSPACE" -type l -exec sh -c '
+    set -eu
+    for LINK do
+        DESTINATION=$(readlink "$LINK")
+        rm -f -- "$LINK"
+        printf "symlink target: %s\n" "$DESTINATION" > "$LINK"
+    done
+' sh {} +
 
 cp -R "$SCRIPT_DIR/vulnhunt" "$SAFE_CONFIG/skills/vulnhunt"
 cp "$SCRIPT_DIR/opencode/agents/vulnhunt-orchestrator.md" "$SAFE_CONFIG/agents/"
@@ -101,6 +152,16 @@ for PARTITION in "$WORKSPACE/$RESULT_NAME"/partitions/sg-*_data.md; do
     fi
     PARTITION_ID=${PARTITION##*/sg-}
     PARTITION_ID=${PARTITION_ID%_data.md}
+    IFS= read -r REACHABILITY < "$PARTITION" || REACHABILITY=
+    case "$REACHABILITY" in
+        "REACHABILITY: DEV-ONLY") continue ;;
+        "REACHABILITY: PRODUCTION") ;;
+        *)
+            echo "error: invalid partition reachability: ${PARTITION##*/}" >&2
+            MISSING_OUTPUT=1
+            continue
+            ;;
+    esac
     for CLASS in inj nav log; do
         RESULT="$WORKSPACE/$RESULT_NAME/results/sg-${PARTITION_ID}_${CLASS}_results.md"
         if [ ! -s "$RESULT" ]; then

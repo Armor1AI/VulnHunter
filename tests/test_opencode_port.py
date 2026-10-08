@@ -103,7 +103,7 @@ class OpenCodePortTests(unittest.TestCase):
             self.assertIn("./run-opencode.sh /path/to/repository", documented_usage)
             self.assertNotIn("--command vulnhunt", documented_usage)
 
-    def test_isolated_launcher_removes_target_config_and_resets_config_home(self):
+    def test_isolated_launcher_uses_trusted_snapshot_and_config(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "source"
@@ -122,6 +122,11 @@ class OpenCodePortTests(unittest.TestCase):
             plugin.write_text("throw new Error('target plugin loaded')\n")
             (source / "opencode.json").write_text('{"plugin":["target-plugin"]}\n')
             (source / "app.py").write_text("print('target')\n")
+            (source / ".gitattributes").write_text("app.py export-ignore\n")
+            (source / "src").mkdir()
+            (source / "src/app.py").write_text("print('nested')\n")
+            (source / "src/.gitattributes").write_text("app.py export-ignore\n")
+            os.symlink("app.py", source / "linked.py")
             subprocess.run(["git", "add", "."], cwd=source, check=True)
             subprocess.run(
                 ["git", "commit", "-q", "-m", "fixture"], cwd=source, check=True
@@ -143,6 +148,12 @@ if sys.argv[1:] == ["run", "--help"]:
 workspace = Path.cwd()
 assert not (workspace / ".opencode/plugins/target.js").exists()
 assert not (workspace / "opencode.json").exists()
+assert not (workspace / ".gitattributes").exists()
+assert (workspace / "app.py").read_text() == "print('target')\\n"
+assert not (workspace / "src/.gitattributes").exists()
+assert (workspace / "src/app.py").read_text() == "print('nested')\\n"
+assert not (workspace / "linked.py").is_symlink()
+assert (workspace / "linked.py").read_text() == "symlink target: app.py\\n"
 assert Path(os.environ["OPENCODE_CONFIG_DIR"]).resolve() == (workspace / ".opencode").resolve()
 assert os.environ["XDG_CONFIG_HOME"] != os.environ["AMBIENT_XDG"]
 assert os.environ["HOME"] != os.environ["AMBIENT_HOME"]
@@ -153,7 +164,8 @@ assert match
 results = Path(match.group(1).strip())
 (results / "partitions").mkdir()
 (results / "results").mkdir()
-(results / "partitions/sg-1_data.md").write_text("# partition\\n")
+(results / "partitions/sg-1_data.md").write_text("REACHABILITY: PRODUCTION\\n")
+(results / "partitions/sg-2_data.md").write_text("REACHABILITY: DEV-ONLY\\n")
 for class_name in ("inj", "nav", "log"):
     if os.environ.get("OMIT_RESULT") == class_name:
         continue
@@ -197,8 +209,100 @@ for class_name in ("inj", "nav", "log"):
             self.assertEqual(incomplete.returncode, 1)
             self.assertIn("missing scan result: sg-1_nav_results.md", incomplete.stderr)
 
+    def test_isolated_launcher_rejects_unmaterialized_git_content(self):
+        cases = {
+            "submodule": "repositories with submodules are not supported",
+            "lfs": "repositories with Git LFS pointers are not supported",
+        }
+        for case, expected_error in cases.items():
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
+                source = Path(temporary) / "source"
+                source.mkdir()
+                subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+                subprocess.run(
+                    ["git", "config", "user.email", "test@example.com"],
+                    cwd=source,
+                    check=True,
+                )
+                subprocess.run(
+                    ["git", "config", "user.name", "Test"],
+                    cwd=source,
+                    check=True,
+                )
+                (source / "app.py").write_text("print('target')\n")
+                subprocess.run(["git", "add", "."], cwd=source, check=True)
+                subprocess.run(
+                    ["git", "commit", "-q", "-m", "fixture"],
+                    cwd=source,
+                    check=True,
+                )
+
+                if case == "submodule":
+                    child = Path(temporary) / "child"
+                    child.mkdir()
+                    subprocess.run(["git", "init", "-q"], cwd=child, check=True)
+                    subprocess.run(
+                        [
+                            "git",
+                            "config",
+                            "user.email",
+                            "test@example.com",
+                        ],
+                        cwd=child,
+                        check=True,
+                    )
+                    subprocess.run(
+                        ["git", "config", "user.name", "Test"],
+                        cwd=child,
+                        check=True,
+                    )
+                    (child / "library.py").write_text("print('library')\n")
+                    subprocess.run(["git", "add", "."], cwd=child, check=True)
+                    subprocess.run(
+                        ["git", "commit", "-q", "-m", "child"],
+                        cwd=child,
+                        check=True,
+                    )
+                    subprocess.run(
+                        [
+                            "git",
+                            "-c",
+                            "protocol.file.allow=always",
+                            "submodule",
+                            "add",
+                            "-q",
+                            str(child),
+                            "vendor/module",
+                        ],
+                        cwd=source,
+                        check=True,
+                    )
+                else:
+                    (source / "asset.bin").write_text(
+                        "version https://git-lfs.github.com/spec/v1\n"
+                        "oid sha256:0123456789abcdef\nsize 1\n"
+                    )
+                    subprocess.run(["git", "add", "asset.bin"], cwd=source, check=True)
+
+                subprocess.run(
+                    ["git", "commit", "-q", "-m", case], cwd=source, check=True
+                )
+                env = os.environ.copy()
+                env["OPENCODE_BIN"] = "false"
+                completed = subprocess.run(
+                    [str(REPO / "run-opencode.sh"), str(source)],
+                    cwd=REPO,
+                    env=env,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(completed.returncode, 1)
+                self.assertIn(expected_error, completed.stderr)
+
     def test_phase2_workers_run_in_the_foreground(self):
         phase2 = (REPO / "vulnhunt" / "phases" / "phase2_hunt.md").read_text()
+        skill = (REPO / "vulnhunt" / "SKILL.md").read_text()
         normalized = " ".join(phase2.split())
         self.assertIn("Run every agent synchronously in the foreground", normalized)
         self.assertIn("Never request a background task", normalized)
@@ -206,6 +310,10 @@ for class_name in ("inj", "nav", "log"):
         self.assertNotIn("In parallel with trace agents", phase2)
         self.assertIn("results/sink_driven_results.md", phase2)
         self.assertIn("Do not return until the file exists", phase2)
+        self.assertIn("REACHABILITY: PRODUCTION", phase2)
+        self.assertIn("REACHABILITY: DEV-ONLY", phase2)
+        self.assertIn("production_partition_count", phase2)
+        self.assertIn("production_partition_count", skill)
 
     def test_core_scanner_has_no_claude_runtime_contracts(self):
         forbidden = {

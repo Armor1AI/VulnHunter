@@ -112,19 +112,19 @@ uninstall-opencode.cmd
 
 ### 1. Run the Scanner with OpenCode
 
-Run scans through the isolated launcher. It scans a clean snapshot of the
-committed `HEAD`, removes target OpenCode configuration and symlinks, and uses a
-temporary config home so target and user plugins cannot load. Set
-`OPENCODE_CONFIG` to a trusted model-only provider config; the isolated run does
-not use your normal OpenCode login state.
+Run scans through the isolated launcher. It materializes every in-scope
+committed Git blob without applying target `export-ignore` attributes. It
+excludes target OpenCode configuration, converts symlinks to inert link-target
+text, and uses a temporary config home. Set `OPENCODE_CONFIG` to a trusted
+model-only provider config; the isolated run does not use your normal login.
 
 ```bash
 ./run-opencode.sh /path/to/repository
 ```
 
-The launcher requires a clean Git checkout plus `git`, `tar`, and OpenCode. On
-Windows, run it from WSL or Git Bash. It prints the final report path and leaves
-the isolated workspace available for inspection.
+The launcher requires a clean Git checkout plus `git`, `tar`, `readlink`, and
+OpenCode. It rejects submodules and Git LFS pointers because their content is
+not stored in the committed tree. On Windows, run it from WSL or Git Bash.
 
 ### 2. Run the Fixer
 The fixer requires `git`, the GitHub CLI (`gh`) authenticated to your target repositories, and its Python helpers installed (`pip install -e ".[dev]"` inside the `vulnhunter-fix/` directory).
