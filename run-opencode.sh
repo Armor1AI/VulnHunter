@@ -102,9 +102,22 @@ cp "$SCRIPT_DIR/opencode/agents/vulnhunt-worker.md" "$SAFE_CONFIG/agents/"
 cp "$SCRIPT_DIR/opencode/commands/vulnhunt.md" "$SAFE_CONFIG/commands/"
 
 REPOSITORY_URL=$(git -C "$SOURCE_ROOT" remote get-url origin 2>/dev/null || basename "$SOURCE_ROOT")
-REPOSITORY_URL=${REPOSITORY_URL%.git}
 case "$REPOSITORY_URL" in
     git@github.com:*) REPOSITORY_URL="https://github.com/${REPOSITORY_URL#git@github.com:}" ;;
+esac
+case "$REPOSITORY_URL" in
+    *://*)
+        URL_SCHEME=${REPOSITORY_URL%%://*}
+        URL_LOCATION=${REPOSITORY_URL#*://}
+        URL_LOCATION=${URL_LOCATION%%\#*}
+        URL_LOCATION=${URL_LOCATION%%\?*}
+        URL_LOCATION=${URL_LOCATION##*@}
+        REPOSITORY_URL="$URL_SCHEME://$URL_LOCATION"
+        ;;
+esac
+REPOSITORY_URL=${REPOSITORY_URL%.git}
+case "$REPOSITORY_URL" in
+    *[!A-Za-z0-9._~:/-]*) REPOSITORY_URL=unknown ;;
 esac
 BRANCH=$(git -C "$SOURCE_ROOT" branch --show-current)
 SHORT_SHA=$(git -C "$SOURCE_ROOT" rev-parse --short HEAD)
@@ -200,12 +213,14 @@ if [ ! -s "$WORKSPACE/$RESULT_NAME/results/sink_driven_results.md" ]; then
     echo "error: missing scan result: sink_driven_results.md" >&2
     MISSING_OUTPUT=1
 fi
+for REQUIRED_OUTPUT in phase2b_output.md phase3_output.md phase3d_output.md README.md; do
+    if [ ! -s "$WORKSPACE/$RESULT_NAME/$REQUIRED_OUTPUT" ]; then
+        echo "error: missing scan output: $REQUIRED_OUTPUT" >&2
+        MISSING_OUTPUT=1
+    fi
+done
 if [ "$MISSING_OUTPUT" -ne 0 ]; then
     echo "error: scan incomplete; workspace preserved at $WORKSPACE" >&2
-    exit 1
-fi
-if [ ! -f "$WORKSPACE/$RESULT_NAME/README.md" ]; then
-    echo "error: scan completed without README.md; workspace preserved at $WORKSPACE" >&2
     exit 1
 fi
 

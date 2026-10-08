@@ -140,6 +140,17 @@ class OpenCodePortTests(unittest.TestCase):
             subprocess.run(
                 ["git", "commit", "-q", "-m", "fixture"], cwd=source, check=True
             )
+            subprocess.run(
+                [
+                    "git",
+                    "remote",
+                    "add",
+                    "origin",
+                    "https://x-access-token:secret@github.com/org/repo.git?access_token=also-secret",
+                ],
+                cwd=source,
+                check=True,
+            )
 
             fake_opencode = root / "opencode"
             fake_opencode.write_text(
@@ -177,6 +188,8 @@ profile = json.loads(os.environ["OPENCODE_CONFIG_CONTENT"])
 assert profile["permission"]["*"] == "deny"
 match = re.search(r"VULNHUNT_DIR: (.+)", sys.argv[-1])
 assert match
+assert "secret" not in sys.argv[-1]
+assert "Repository URL: https://github.com/org/repo" in sys.argv[-1]
 results = Path(match.group(1).strip())
 (results / "results").mkdir()
 if os.environ.get("ZERO_PARTITIONS") == "1":
@@ -192,7 +205,9 @@ else:
             continue
         (results / f"results/sg-1_{class_name}_results.md").write_text("# result\\n")
 (results / "results/sink_driven_results.md").write_text("# result\\n")
-(results / "README.md").write_text("# report\\n")
+for artifact in ("phase2b_output.md", "phase3_output.md", "phase3d_output.md", "README.md"):
+    if os.environ.get("OMIT_ARTIFACT") != artifact:
+        (results / artifact).write_text("# report\\n")
 """
             )
             fake_opencode.chmod(0o755)
@@ -244,6 +259,21 @@ else:
             self.assertIn("expected 3 partition files, found 2", mismatched.stderr)
 
             env.pop("PARTITION_COUNT_OVERRIDE")
+            env["OMIT_ARTIFACT"] = "phase2b_output.md"
+            unverified = subprocess.run(
+                [str(REPO / "run-opencode.sh"), str(source)],
+                cwd=REPO,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(unverified.returncode, 1)
+            self.assertIn(
+                "missing scan output: phase2b_output.md", unverified.stderr
+            )
+
+            env.pop("OMIT_ARTIFACT")
             env["ZERO_PARTITIONS"] = "1"
             empty = subprocess.run(
                 [str(REPO / "run-opencode.sh"), str(source)],
