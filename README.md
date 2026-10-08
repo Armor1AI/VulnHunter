@@ -125,7 +125,8 @@ isolated run does not use your normal login.
 
 The launcher requires a clean Git checkout plus `git`, `tar`, `readlink`, and
 OpenCode. It rejects submodules and Git LFS pointers because their content is
-not stored in the committed tree. On Windows, run it from WSL or Git Bash.
+not stored in the committed tree. The isolated snapshot is read-only except for
+its fresh results directory. On Windows, run it from WSL or Git Bash.
 
 ### 2. Run the Fixer
 The fixer requires `git`, the GitHub CLI (`gh`) authenticated to your target repositories, and its Python helpers installed (`pip install -e ".[dev]"` inside the `vulnhunter-fix/` directory).

@@ -223,8 +223,11 @@ variant. See "Build-Time Code Swapping" in Phase 1 for how to detect this.
    > Your scan directory is `${VULNHUNT_DIR}`. Follow the prompt in
    > `${PHASES_DIR}/phase2b_verify.md`. Read all result files from
    > `${VULNHUNT_DIR}/results/`. Write output to
-   > `${VULNHUNT_DIR}/phase2b_output.md`. IMPORTANT: Return ≤20 words.
-   Verify output file exists.
+   > `${VULNHUNT_DIR}/phase2b_output.md`. Its first line must be exactly
+   > `CONFIRMED_COUNT: N`, counting findings that proceed to Phase 3.
+   > IMPORTANT: Return ≤20 words.
+   Verify the output file and count marker exist. If the count is zero, skip
+   steps D and E and proceed to the report.
 
    **D. Phase 3a+3b+3c - Reproduce, Test, Fix**: Launch a `vulnhunt-worker` subagent:
    > Your scan directory is `${VULNHUNT_DIR}`. Follow the prompts in
@@ -267,7 +270,8 @@ variant. See "Build-Time Code Swapping" in Phase 1 for how to detect this.
    Do NOT group multiple sink locations under one VULN-NNN. Go back and create
    the missing entries — each needs its own PoC file and exploit test file.
 
-   Save all artifacts to `${VULNHUNT_DIR}/` and generate the README.
+   Save all artifacts to `${VULNHUNT_DIR}/`, generate the README, and write the
+   final finding-to-artifact mapping to `${VULNHUNT_DIR}/findings.manifest`.
 
 ### What the report contains
 

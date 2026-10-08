@@ -249,6 +249,11 @@ not surfaced as separate findings. Platform PoC + exploit test stand in.
 
 ### Verification Output
 
+Write the complete verification result to `${VULNHUNT_DIR}/phase2b_output.md`.
+Its first line must be exactly `CONFIRMED_COUNT: N`, where `N` is the number of
+non-subsumed confirmed findings that proceed to Phase 3, including a platform
+auth rollup when one is emitted. Use `CONFIRMED_COUNT: 0` when none proceed.
+
 **You MUST present this table to the user before proceeding to Phase 3.**
 
 For each candidate finding, record the verification result:

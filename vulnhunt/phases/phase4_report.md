@@ -186,6 +186,22 @@ and back to the README.
 Finally, read every local artifact path linked by the README. If any read fails,
 correct the link and repeat the check. Do not report completion with unresolved
 links or a summary row whose number of cells differs from its header.
+Identify exposed credentials by location and type, but redact their values from
+the README and all supporting artifacts.
+
+### Finding manifest
+
+After the README is final, write `${VULNHUNT_DIR}/findings.manifest`. Its first
+line must be `FINDING_COUNT: N`, followed by one line per final report finding:
+
+```text
+FINDING_COUNT: 1
+VULN-001|poc/VULN-001_sql_injection.md|exploit_tests/test_vuln_001_sql_injection.py
+```
+
+Use `FINDING_COUNT: 0` with no additional lines for a clean report. Each entry
+must use the exact relative paths linked by the README. Do not include code
+smells, eliminated candidates, or subsumed findings as separate entries.
 
 ## What NOT to Report
 

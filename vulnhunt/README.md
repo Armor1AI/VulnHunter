@@ -45,7 +45,8 @@ pointers because their contents are outside the committed tree.
 Set `OPENCODE_CONFIG` to a trusted model-only provider config.
 
 The scan writes its artifacts to a `*_VULNHUNT_RESULTS_*` directory in the
-isolated workspace (report `README.md`, static PoCs, and exploit-test source).
+isolated workspace (report `README.md`, finding manifest, static PoCs, and
+exploit-test source).
 It does not modify the target checkout.
 
 Automated callers may pre-create the results directory and pass its path,
