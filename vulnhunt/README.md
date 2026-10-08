@@ -29,15 +29,22 @@ or editing the scanner.
 
 ## Usage
 
+From the repository root, scan a clean committed checkout through the isolated
+launcher:
+
 ```bash
-OPENCODE_CONFIG="$HOME/.config/opencode/vulnhunt.static.json" \
-  opencode run --agent vulnhunt-orchestrator \
-  "Load the vulnhunt skill and follow it exactly. Scan the current repository. Perform a static, no-Bash audit."
+./run-opencode.sh /path/to/repository
 ```
 
-The scan writes its artifacts to a `*_VULNHUNT_RESULTS_*` directory (report
-`README.md`, static PoCs, and exploit-test source). VulnHunter **never modifies
-the target codebase** — fix strategies are documented, not applied.
+The launcher excludes target OpenCode configuration and symlinks and uses an
+isolated config home. This prevents startup plugins from the target or user
+config from executing before scanner permissions apply. Set `OPENCODE_CONFIG`
+to a trusted model-only provider config; the isolated run does not use your
+normal OpenCode login state.
+
+The scan writes its artifacts to a `*_VULNHUNT_RESULTS_*` directory in the
+isolated workspace (report `README.md`, static PoCs, and exploit-test source).
+It does not modify the target checkout.
 
 Automated callers may pre-create the results directory and pass its path,
 repository URL, and branch in a `Pre-resolved scan metadata` block. The existing
@@ -55,7 +62,7 @@ methodology instead of improvised analysis.
 | Phase | File | Responsibility |
 |-------|------|----------------|
 | 1 · Recon | `phases/phase1_recon.md` | Build the input inventory, partition the codebase, annotate production reachability. |
-| 2 · Hunt | `phases/phase2_hunt.md` + `phase2_class_{inj,nav,log}.md` | Parallel class agents (injection / navigation-&-access / logic-&-crypto) trace inputs to sinks per partition, plus one sink-driven audit agent. |
+| 2 · Hunt | `phases/phase2_hunt.md` + `phase2_class_{inj,nav,log}.md` | Restricted class agents trace inputs to sinks sequentially, followed by a sink-driven audit. |
 | 2b · Verify | `phases/phase2b_verify.md` | Adversarial pass that tries to *disprove* each candidate; ~half are eliminated. |
 | 3 · Reproduce | `phases/phase3_reproduce_test.md` + `phase3c_fixes.md` | Write PoCs, executable exploit tests, and fix strategies. |
 | 3d · Sweep | `phases/phase3d_sweep.md` | Grep every confirmed root-cause pattern across the whole codebase. |
@@ -67,6 +74,7 @@ it is cached across the parallel dispatch.
 ## Requirements
 
 - OpenCode 1.18.31 or later with a configured model.
+- A clean Git checkout plus `git` and `tar` for the isolated launcher.
 - Python is not required. The provided agents deny `bash`, network tools, and
   edits outside `*_VULNHUNT_RESULTS_*` directories.
 

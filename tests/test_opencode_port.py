@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -17,7 +18,8 @@ class OpenCodePortTests(unittest.TestCase):
     def test_installer_and_uninstaller_manage_the_opencode_scanner(self):
         with tempfile.TemporaryDirectory() as config_home:
             env = os.environ.copy()
-            env["XDG_CONFIG_HOME"] = config_home
+            env["HOME"] = config_home
+            env["XDG_CONFIG_HOME"] = str(Path(config_home) / "ignored-xdg")
             subprocess.run(
                 [str(REPO / "install-opencode.sh")],
                 cwd=REPO,
@@ -27,7 +29,7 @@ class OpenCodePortTests(unittest.TestCase):
                 text=True,
             )
 
-            installed = Path(config_home) / "opencode"
+            installed = Path(config_home) / ".config" / "opencode"
             expected = {
                 "skills/vulnhunt/SKILL.md": REPO / "vulnhunt/SKILL.md",
                 "commands/vulnhunt.md": REPO / "opencode/commands/vulnhunt.md",
@@ -59,8 +61,9 @@ class OpenCodePortTests(unittest.TestCase):
             (REPO / "opencode" / "opencode.vulnhunt.json").read_text()
         )
         permissions = profile["permission"]
-        for tool in ("bash", "webfetch", "websearch", "lsp", "question"):
-            self.assertEqual(permissions[tool], "deny")
+        self.assertEqual(permissions["*"], "deny")
+        for tool in ("read", "glob", "grep"):
+            self.assertEqual(permissions[tool], "allow")
         self.assertEqual(permissions["external_directory"]["*"], "deny")
         self.assertEqual(permissions["edit"]["*"], "deny")
         self.assertEqual(
@@ -83,34 +86,116 @@ class OpenCodePortTests(unittest.TestCase):
         ).read_text()
 
         for content in (orchestrator, worker):
-            for rule in (
-                "bash: deny",
-                "webfetch: deny",
-                "websearch: deny",
-                "lsp: deny",
-            ):
+            for rule in ('"*": deny', "read: allow", "glob: allow", "grep: allow"):
                 self.assertIn(rule, content)
             self.assertIn('"*_VULNHUNT_RESULTS_*/**": allow', content)
             self.assertIn('"**/*_VULNHUNT_RESULTS_*/**": allow', content)
 
         self.assertIn("vulnhunt-worker: allow", orchestrator)
-        self.assertIn("task: deny", worker)
-        self.assertIn("skill: deny", worker)
 
     def test_command_uses_restricted_orchestrator_and_arguments(self):
         command = (REPO / "opencode" / "commands" / "vulnhunt.md").read_text()
         self.assertIn("agent: vulnhunt-orchestrator", command)
         self.assertIn("$ARGUMENTS", command)
 
-        for path in (
-            REPO / "README.md",
-            REPO / "vulnhunt" / "README.md",
-            REPO / "install-opencode.sh",
-            REPO / "install-opencode.cmd",
-        ):
+        for path in (REPO / "README.md", REPO / "vulnhunt" / "README.md"):
             documented_usage = path.read_text()
-            self.assertIn("--agent vulnhunt-orchestrator", documented_usage)
+            self.assertIn("./run-opencode.sh /path/to/repository", documented_usage)
             self.assertNotIn("--command vulnhunt", documented_usage)
+
+    def test_isolated_launcher_removes_target_config_and_resets_config_home(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            source.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.com"],
+                cwd=source,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test"], cwd=source, check=True
+            )
+            plugin = source / ".opencode" / "plugins" / "target.js"
+            plugin.parent.mkdir(parents=True)
+            plugin.write_text("throw new Error('target plugin loaded')\n")
+            (source / "opencode.json").write_text('{"plugin":["target-plugin"]}\n')
+            (source / "app.py").write_text("print('target')\n")
+            subprocess.run(["git", "add", "."], cwd=source, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "fixture"], cwd=source, check=True
+            )
+
+            fake_opencode = root / "opencode"
+            fake_opencode.write_text(
+                """#!/usr/bin/env python3
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+if sys.argv[1:] == ["run", "--help"]:
+    print("--standalone --pure")
+    raise SystemExit(0)
+
+workspace = Path.cwd()
+assert not (workspace / ".opencode/plugins/target.js").exists()
+assert not (workspace / "opencode.json").exists()
+assert Path(os.environ["OPENCODE_CONFIG_DIR"]).resolve() == (workspace / ".opencode").resolve()
+assert os.environ["XDG_CONFIG_HOME"] != os.environ["AMBIENT_XDG"]
+assert os.environ["HOME"] != os.environ["AMBIENT_HOME"]
+profile = json.loads(os.environ["OPENCODE_CONFIG_CONTENT"])
+assert profile["permission"]["*"] == "deny"
+match = re.search(r"VULNHUNT_DIR: (.+)", sys.argv[-1])
+assert match
+results = Path(match.group(1).strip())
+(results / "partitions").mkdir()
+(results / "results").mkdir()
+(results / "partitions/sg-1_data.md").write_text("# partition\\n")
+for class_name in ("inj", "nav", "log"):
+    if os.environ.get("OMIT_RESULT") == class_name:
+        continue
+    (results / f"results/sg-1_{class_name}_results.md").write_text("# result\\n")
+(results / "results/sink_driven_results.md").write_text("# result\\n")
+(results / "README.md").write_text("# report\\n")
+"""
+            )
+            fake_opencode.chmod(0o755)
+
+            ambient_xdg = root / "ambient-xdg"
+            env = os.environ.copy()
+            env["OPENCODE_BIN"] = str(fake_opencode)
+            env["XDG_CONFIG_HOME"] = str(ambient_xdg)
+            env["AMBIENT_XDG"] = str(ambient_xdg)
+            env["AMBIENT_HOME"] = env["HOME"]
+            completed = subprocess.run(
+                [str(REPO / "run-opencode.sh"), str(source)],
+                cwd=REPO,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                completed.returncode, 0, completed.stdout + completed.stderr
+            )
+            report = re.search(r"^Report: (.+)$", completed.stdout, re.MULTILINE)
+            self.assertIsNotNone(report)
+            self.assertEqual(Path(report.group(1)).read_text(), "# report\n")
+
+            env["OMIT_RESULT"] = "nav"
+            incomplete = subprocess.run(
+                [str(REPO / "run-opencode.sh"), str(source)],
+                cwd=REPO,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(incomplete.returncode, 1)
+            self.assertIn("missing scan result: sg-1_nav_results.md", incomplete.stderr)
 
     def test_phase2_workers_run_in_the_foreground(self):
         phase2 = (REPO / "vulnhunt" / "phases" / "phase2_hunt.md").read_text()
@@ -119,6 +204,8 @@ class OpenCodePortTests(unittest.TestCase):
         self.assertIn("Never request a background task", normalized)
         self.assertNotIn("parallel trace agents", phase2)
         self.assertNotIn("In parallel with trace agents", phase2)
+        self.assertIn("results/sink_driven_results.md", phase2)
+        self.assertIn("Do not return until the file exists", phase2)
 
     def test_core_scanner_has_no_claude_runtime_contracts(self):
         forbidden = {

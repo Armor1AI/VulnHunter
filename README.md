@@ -86,7 +86,7 @@ Each component is organized into a self-contained subtree:
 git clone https://github.com/Armor1AI/VulnHunter.git
 cd VulnHunter
 
-# Install the OpenCode scanner, command, and restricted agents
+# Install the command and agents for trusted interactive use
 ./install-opencode.sh
 
 # Remove the installed OpenCode scanner assets
@@ -111,11 +111,20 @@ uninstall-opencode.cmd
 ## Usage Guide
 
 ### 1. Run the Scanner with OpenCode
+
+Run scans through the isolated launcher. It scans a clean snapshot of the
+committed `HEAD`, removes target OpenCode configuration and symlinks, and uses a
+temporary config home so target and user plugins cannot load. Set
+`OPENCODE_CONFIG` to a trusted model-only provider config; the isolated run does
+not use your normal OpenCode login state.
+
 ```bash
-OPENCODE_CONFIG="$HOME/.config/opencode/vulnhunt.static.json" \
-  opencode run --agent vulnhunt-orchestrator \
-  "Load the vulnhunt skill and follow it exactly. Scan the current repository. Perform a static, no-Bash audit."
+./run-opencode.sh /path/to/repository
 ```
+
+The launcher requires a clean Git checkout plus `git`, `tar`, and OpenCode. On
+Windows, run it from WSL or Git Bash. It prints the final report path and leaves
+the isolated workspace available for inspection.
 
 ### 2. Run the Fixer
 The fixer requires `git`, the GitHub CLI (`gh`) authenticated to your target repositories, and its Python helpers installed (`pip install -e ".[dev]"` inside the `vulnhunter-fix/` directory).

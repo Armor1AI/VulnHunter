@@ -1,0 +1,125 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -gt 1 ]; then
+    echo "usage: $0 [repository]" >&2
+    exit 2
+fi
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+TARGET=${1:-.}
+OPENCODE_BIN=${OPENCODE_BIN:-opencode}
+
+command -v git >/dev/null 2>&1 || { echo "error: git is required" >&2; exit 1; }
+command -v tar >/dev/null 2>&1 || { echo "error: tar is required" >&2; exit 1; }
+command -v "$OPENCODE_BIN" >/dev/null 2>&1 || {
+    echo "error: OpenCode not found: $OPENCODE_BIN" >&2
+    exit 1
+}
+
+SOURCE_ROOT=$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null) || {
+    echo "error: repository must be a Git checkout" >&2
+    exit 1
+}
+if [ -n "$(git -C "$SOURCE_ROOT" status --porcelain --untracked-files=all)" ]; then
+    echo "error: repository must be clean; the isolated scan uses the committed HEAD" >&2
+    exit 1
+fi
+
+TEMP_BASE=${TMPDIR:-/tmp}
+TEMP_BASE=${TEMP_BASE%/}
+WORK_ROOT_RAW=$(mktemp -d "$TEMP_BASE/vulnhunter-opencode.XXXXXX")
+WORK_ROOT=$(CDPATH= cd -- "$WORK_ROOT_RAW" && pwd -P)
+WORKSPACE="$WORK_ROOT/repo"
+SAFE_CONFIG="$WORKSPACE/.opencode"
+mkdir -p "$WORKSPACE" "$SAFE_CONFIG/agents" "$SAFE_CONFIG/commands" \
+    "$SAFE_CONFIG/skills" "$WORK_ROOT/home" "$WORK_ROOT/xdg"
+
+git -C "$SOURCE_ROOT" archive --format=tar HEAD -- . \
+    ':(exclude).opencode' ':(exclude).opencode/**' \
+    ':(exclude)opencode.json' ':(exclude)opencode.jsonc' \
+    | tar -xf - -C "$WORKSPACE"
+find "$WORKSPACE" -type l -exec rm -f -- {} +
+
+cp -R "$SCRIPT_DIR/vulnhunt" "$SAFE_CONFIG/skills/vulnhunt"
+cp "$SCRIPT_DIR/opencode/agents/vulnhunt-orchestrator.md" "$SAFE_CONFIG/agents/"
+cp "$SCRIPT_DIR/opencode/agents/vulnhunt-worker.md" "$SAFE_CONFIG/agents/"
+cp "$SCRIPT_DIR/opencode/commands/vulnhunt.md" "$SAFE_CONFIG/commands/"
+
+REPOSITORY_URL=$(git -C "$SOURCE_ROOT" remote get-url origin 2>/dev/null || basename "$SOURCE_ROOT")
+REPOSITORY_URL=${REPOSITORY_URL%.git}
+case "$REPOSITORY_URL" in
+    git@github.com:*) REPOSITORY_URL="https://github.com/${REPOSITORY_URL#git@github.com:}" ;;
+esac
+BRANCH=$(git -C "$SOURCE_ROOT" branch --show-current)
+SHORT_SHA=$(git -C "$SOURCE_ROOT" rev-parse --short HEAD)
+[ -n "$BRANCH" ] || BRANCH=unknown
+REPO_NAME=$(printf '%s' "$(basename "$SOURCE_ROOT")" | tr -c 'A-Za-z0-9._-' '_')
+RESULT_NAME="${REPO_NAME}_VULNHUNT_RESULTS_$(date -u +%Y-%m-%d-%H%M%S)"
+mkdir "$WORKSPACE/$RESULT_NAME"
+
+PROMPT="Load the vulnhunt skill and follow it exactly. Perform an explicitly authorized static, no-Bash security review of this repository.
+
+Pre-resolved scan metadata:
+- VULNHUNT_DIR: $WORKSPACE/$RESULT_NAME
+- VULNHUNT_BRANCH: $BRANCH [$SHORT_SHA]
+- Repository URL: $REPOSITORY_URL"
+
+RUN_HELP=$($OPENCODE_BIN run --help 2>&1)
+set -- run
+case "$RUN_HELP" in *--standalone*) set -- "$@" --standalone ;; esac
+case "$RUN_HELP" in *--pure*) set -- "$@" --pure ;; esac
+set -- "$@" --auto --agent vulnhunt-orchestrator "$PROMPT"
+
+echo "Scanning committed snapshot $SHORT_SHA in isolated workspace: $WORKSPACE"
+set +e
+(
+    cd "$WORKSPACE"
+    HOME="$WORK_ROOT/home" \
+    XDG_CONFIG_HOME="$WORK_ROOT/xdg" \
+    OPENCODE_CONFIG_DIR="$SAFE_CONFIG" \
+    OPENCODE_CONFIG_CONTENT="$(cat "$SCRIPT_DIR/opencode/opencode.vulnhunt.json")" \
+    OPENCODE_DISABLE_AUTOUPDATE=true \
+    OPENCODE_DISABLE_PROJECT_CONFIG=true \
+    OPENCODE_DISABLE_DEFAULT_PLUGINS=true \
+    "$OPENCODE_BIN" "$@"
+)
+STATUS=$?
+set -e
+
+if [ "$STATUS" -ne 0 ]; then
+    echo "error: scan failed; workspace preserved at $WORKSPACE" >&2
+    exit "$STATUS"
+fi
+
+MISSING_OUTPUT=0
+for PARTITION in "$WORKSPACE/$RESULT_NAME"/partitions/sg-*_data.md; do
+    if [ ! -f "$PARTITION" ]; then
+        echo "error: scan did not produce partition data" >&2
+        MISSING_OUTPUT=1
+        break
+    fi
+    PARTITION_ID=${PARTITION##*/sg-}
+    PARTITION_ID=${PARTITION_ID%_data.md}
+    for CLASS in inj nav log; do
+        RESULT="$WORKSPACE/$RESULT_NAME/results/sg-${PARTITION_ID}_${CLASS}_results.md"
+        if [ ! -s "$RESULT" ]; then
+            echo "error: missing scan result: ${RESULT##*/}" >&2
+            MISSING_OUTPUT=1
+        fi
+    done
+done
+if [ ! -s "$WORKSPACE/$RESULT_NAME/results/sink_driven_results.md" ]; then
+    echo "error: missing scan result: sink_driven_results.md" >&2
+    MISSING_OUTPUT=1
+fi
+if [ "$MISSING_OUTPUT" -ne 0 ]; then
+    echo "error: scan incomplete; workspace preserved at $WORKSPACE" >&2
+    exit 1
+fi
+if [ ! -f "$WORKSPACE/$RESULT_NAME/README.md" ]; then
+    echo "error: scan completed without README.md; workspace preserved at $WORKSPACE" >&2
+    exit 1
+fi
+
+echo "Report: $WORKSPACE/$RESULT_NAME/README.md"

@@ -3,11 +3,10 @@
   "plugin": [],
   "mcp": {},
   "permission": {
-    "bash": "deny",
-    "webfetch": "deny",
-    "websearch": "deny",
-    "lsp": "deny",
-    "question": "deny",
+    "*": "deny",
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
     "external_directory": {
       "*": "deny",
       "~/.config/opencode/skills/vulnhunt/**": "allow"
@@ -20,6 +19,10 @@
     "task": {
       "*": "deny",
       "vulnhunt-worker": "allow"
+    },
+    "skill": {
+      "*": "deny",
+      "vulnhunt": "allow"
     }
   }
 }

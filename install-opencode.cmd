@@ -6,11 +6,7 @@ if "%USERPROFILE%"=="" (
   exit /b 1
 )
 
-if "%XDG_CONFIG_HOME%"=="" (
-  set "CONFIG_ROOT=%USERPROFILE%\.config\opencode"
-) else (
-  set "CONFIG_ROOT=%XDG_CONFIG_HOME%\opencode"
-)
+set "CONFIG_ROOT=%USERPROFILE%\.config\opencode"
 
 set "SKILL_DST=%CONFIG_ROOT%\skills\vulnhunt"
 set "COMMAND_DST=%CONFIG_ROOT%\commands\vulnhunt.md"
@@ -38,4 +34,4 @@ echo   skill:   %SKILL_DST%
 echo   command: %COMMAND_DST%
 echo   agents:  %AGENT_DIR%\vulnhunt-{orchestrator,worker}.md
 echo   profile: %PROFILE_DST%
-echo Run: set OPENCODE_CONFIG=%PROFILE_DST% ^&^& opencode run --agent vulnhunt-orchestrator "Load the vulnhunt skill and scan the current repository."
+echo Do not run OpenCode inside an untrusted checkout. Use a sanitized copy.

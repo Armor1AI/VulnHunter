@@ -7,7 +7,7 @@ if [ -z "${HOME:-}" ]; then
 fi
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-CONFIG_ROOT=${XDG_CONFIG_HOME:-"$HOME/.config"}/opencode
+CONFIG_ROOT="$HOME/.config/opencode"
 SKILL_DST="$CONFIG_ROOT/skills/vulnhunt"
 COMMAND_DST="$CONFIG_ROOT/commands/vulnhunt.md"
 AGENT_DIR="$CONFIG_ROOT/agents"
@@ -26,4 +26,4 @@ echo "  skill:   $SKILL_DST"
 echo "  command: $COMMAND_DST"
 echo "  agents:  $AGENT_DIR/vulnhunt-{orchestrator,worker}.md"
 echo "  profile: $PROFILE_DST"
-echo "Run: OPENCODE_CONFIG=$PROFILE_DST opencode run --agent vulnhunt-orchestrator \"Load the vulnhunt skill and scan the current repository.\""
+echo "Run untrusted scans through: $SCRIPT_DIR/run-opencode.sh /path/to/repository"

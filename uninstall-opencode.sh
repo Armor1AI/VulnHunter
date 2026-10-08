@@ -6,7 +6,7 @@ if [ -z "${HOME:-}" ]; then
     exit 1
 fi
 
-CONFIG_ROOT=${XDG_CONFIG_HOME:-"$HOME/.config"}/opencode
+CONFIG_ROOT="$HOME/.config/opencode"
 rm -rf "$CONFIG_ROOT/skills/vulnhunt"
 rm -f "$CONFIG_ROOT/commands/vulnhunt.md"
 rm -f "$CONFIG_ROOT/agents/vulnhunt-orchestrator.md"

@@ -2,11 +2,10 @@
 description: Orchestrates the VulnHunter static SAST phases and compiles results
 mode: primary
 permission:
-  bash: deny
-  webfetch: deny
-  websearch: deny
-  lsp: deny
-  question: deny
+  "*": deny
+  read: allow
+  glob: allow
+  grep: allow
   external_directory:
     "*": deny
     "~/.config/opencode/skills/vulnhunt/**": allow

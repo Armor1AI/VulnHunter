@@ -3,16 +3,13 @@ description: Executes one isolated VulnHunter analysis phase and writes its assi
 mode: subagent
 hidden: true
 permission:
-  bash: deny
-  webfetch: deny
-  websearch: deny
-  lsp: deny
-  question: deny
+  "*": deny
+  read: allow
+  glob: allow
+  grep: allow
   external_directory:
     "*": deny
     "~/.config/opencode/skills/vulnhunt/**": allow
-  skill: deny
-  task: deny
   edit:
     "*": deny
     "*_VULNHUNT_RESULTS_*/**": allow

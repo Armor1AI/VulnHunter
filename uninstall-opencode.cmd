@@ -6,11 +6,7 @@ if "%USERPROFILE%"=="" (
   exit /b 1
 )
 
-if "%XDG_CONFIG_HOME%"=="" (
-  set "CONFIG_ROOT=%USERPROFILE%\.config\opencode"
-) else (
-  set "CONFIG_ROOT=%XDG_CONFIG_HOME%\opencode"
-)
+set "CONFIG_ROOT=%USERPROFILE%\.config\opencode"
 
 if exist "%CONFIG_ROOT%\skills\vulnhunt" rmdir /s /q "%CONFIG_ROOT%\skills\vulnhunt"
 if exist "%CONFIG_ROOT%\commands\vulnhunt.md" del /q "%CONFIG_ROOT%\commands\vulnhunt.md"
