@@ -235,7 +235,8 @@ variant. See "Build-Time Code Swapping" in Phase 1 for how to detect this.
    > `${PHASES_DIR}/phase3_reproduce_test.md` and `${PHASES_DIR}/phase3c_fixes.md`.
    > Read confirmed findings from `${VULNHUNT_DIR}/phase2b_output.md`.
    > Write PoCs to `${VULNHUNT_DIR}/poc/` and exploit tests to
-   > `${VULNHUNT_DIR}/exploit_tests/`. Write the phase summary (VULN-NNN
+   > `${VULNHUNT_DIR}/exploit_tests/`, using the ID-bound filenames required by
+   > `phase3_reproduce_test.md`. Write the phase summary (VULN-NNN
    > assignment table, reconciliation ledger, per-finding fix strategies) to
    > `${VULNHUNT_DIR}/phase3_output.md` — that exact filename, at the
    > results-dir top level. Do NOT name the file after a prompt

@@ -11,7 +11,10 @@ name files after a prompt (`phase3c_fixes.md`, `phase3_reproduce_test.md`,
 etc.):
 
 - PoCs: `${VULNHUNT_DIR}/poc/VULN-NNN_*.md` (one per finding)
-- Exploit tests: `${VULNHUNT_DIR}/exploit_tests/test_vuln_NNN_*.py`
+- Exploit tests: `${VULNHUNT_DIR}/exploit_tests/test_vuln_NNN_*.<ext>`
+  for numeric IDs. Platform rollups use
+  `test_vuln_platform_authn_*.<ext>` or `test_vuln_platform_authz_*.<ext>`.
+  The lowercase/underscore ID stem is mandatory and binds the test to its finding.
 - Phase summary (VULN-NNN assignment table from the completeness check
   below + per-finding fix strategies from `phase3c_fixes.md`):
   `${VULNHUNT_DIR}/phase3_output.md` — that exact filename, at the
@@ -56,7 +59,8 @@ format based on context:
 
 > **Universal Auth Gap (Phase 2b §9)**: for `VULN-PLATFORM-AUTHN` or
 > `VULN-PLATFORM-AUTHZ`, produce ONE PoC against ONE representative
-> endpoint and ONE exploit test. Do NOT generate per-endpoint PoCs or
+> endpoint and ONE exploit test named `test_vuln_platform_authn_*.<ext>` or
+> `test_vuln_platform_authz_*.<ext>`, respectively. Do NOT generate per-endpoint PoCs or
 > tests for `SUBSUMED-BY: VULN-PLATFORM-*` findings — the platform
 > PoC stands in.
 
@@ -276,4 +280,8 @@ ${VULNHUNT_DIR}/exploit_tests/
 ```
 
 Use the project's native test language/framework when possible. Fall back to Python
-or shell scripts for cross-language testing.
+or shell scripts for cross-language testing. The filename must start with the
+finding's normalized ID: strip `VULN-`, lowercase it, replace hyphens with
+underscores, and prefix it with `test_vuln_`. For example, `VULN-002` requires
+`test_vuln_002_*`, and `VULN-PLATFORM-AUTHN` requires
+`test_vuln_platform_authn_*`. Never swap or reuse another finding's test path.

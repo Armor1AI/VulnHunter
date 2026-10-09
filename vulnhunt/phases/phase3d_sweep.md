@@ -143,6 +143,8 @@ For each CANDIDATE instance found during the sweep, apply the full pipeline:
    exemptions, Gate 2b methodology, Gate 3 "Do NOT eliminate" rules, severity
    floors) when triaging candidates of that class.
 2. **PoC** (Phase 3a format) — save to `${VULNHUNT_DIR}/poc/VULN-NNN_description.md`
-3. **Exploit Test** (Phase 3b format) — save to `${VULNHUNT_DIR}/exploit_tests/test_vuln_NNN.*`
+3. **Exploit Test** (Phase 3b format) — save numeric findings as
+   `${VULNHUNT_DIR}/exploit_tests/test_vuln_NNN_*.<ext>`; a platform rollup uses
+   `test_vuln_platform_authn_*.<ext>` or `test_vuln_platform_authz_*.<ext>`.
 
 Only instances with STATIC-CONFIRMED results become VULN-NNN findings.

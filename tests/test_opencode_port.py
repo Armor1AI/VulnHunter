@@ -294,11 +294,13 @@ else:
             continue
         (results / f"results/sg-1_{class_name}_results.md").write_text("# result\\n")
 (results / "results/sink_driven_results.md").write_text("# result\\n")
-finding_id = (
-    "VULN-PLATFORM-AUTHN"
-    if scenario.get("PLATFORM_ROLLUP") == "1"
-    else "VULN-001"
-)
+platform_rollup = scenario.get("PLATFORM_ROLLUP")
+if platform_rollup == "AUTHZ":
+    finding_id = "VULN-PLATFORM-AUTHZ"
+elif platform_rollup:
+    finding_id = "VULN-PLATFORM-AUTHN"
+else:
+    finding_id = "VULN-001"
 confirmed_ids = [] if scenario.get("CONFIRMED_COUNT") == "0" else [finding_id]
 if scenario.get("SECOND_CONFIRMED"):
     confirmed_ids.append("VULN-002")
@@ -350,7 +352,12 @@ if confirmed:
     (results / "poc").mkdir()
     (results / "exploit_tests").mkdir()
     poc = f"poc/{finding_id}_sql_injection.md"
-    test = f"exploit_tests/{finding_id}_exploit_test.py"
+    test_id_stem = finding_id[len("VULN-") :].lower().replace("-", "_")
+    test = f"exploit_tests/test_vuln_{test_id_stem}_sql_injection.py"
+    if scenario.get("SECOND_TEST") == "swapped":
+        test = "exploit_tests/test_vuln_002_sql_injection.py"
+    elif scenario.get("WRONG_TEST_ID") == "1":
+        test = "exploit_tests/test_vuln_999_sql_injection.py"
     if scenario.get("SYMLINK_POC") == "1":
         os.symlink("../../app.py", results / poc)
     elif scenario.get("OMIT_FINDING_ARTIFACT") != "poc":
@@ -367,10 +374,10 @@ if confirmed:
         "| ID | Evidence |\\n|---|---|\\n"
         f"| {finding_id} | [PoC]({poc}) \\\\| [Test]({linked_test}) |\\n"
     )
-    if scenario.get("PLATFORM_ROLLUP") == "1":
+    if platform_rollup:
         report += (
             "\\n- VULN-001 at app.py:1, CWE-306 — "
-            "SUBSUMED-BY: VULN-PLATFORM-AUTHN\\n"
+            f"SUBSUMED-BY: {finding_id}\\n"
         )
     manifest = (
         "FINDING_COUNT: 0\\n"
@@ -379,12 +386,15 @@ if confirmed:
     )
     if scenario.get("SECOND_TEST"):
         second_poc = "poc/VULN-002_path_traversal.md"
-        second_test = "exploit_tests/path_traversal.py"
+        second_test = "exploit_tests/test_vuln_002_path_traversal.py"
         (results / second_poc).write_text("# second poc\\n")
         if scenario["SECOND_TEST"] == "shared":
             second_test = test
         elif scenario["SECOND_TEST"] == "hardlink":
             os.link(results / test, results / second_test)
+        elif scenario["SECOND_TEST"] == "swapped":
+            second_test = "exploit_tests/test_vuln_001_path_traversal.py"
+            (results / second_test).write_text("# swapped test\\n")
         else:
             (results / second_test).write_text("# independent test\\n")
         report += (
@@ -495,6 +505,13 @@ if scenario.get("OMIT_ARTIFACT") != "findings.manifest":
             rollup = run_scenario({"PLATFORM_ROLLUP": "1"})
             self.assertEqual(rollup.returncode, 0, rollup.stdout + rollup.stderr)
 
+            rollup_authz = run_scenario({"PLATFORM_ROLLUP": "AUTHZ"})
+            self.assertEqual(
+                rollup_authz.returncode,
+                0,
+                rollup_authz.stdout + rollup_authz.stderr,
+            )
+
             for disposition in ("invalidated", "downgraded"):
                 with self.subTest(disposition=disposition):
                     reconciled = run_scenario({"SECOND_CONFIRMED": disposition})
@@ -519,11 +536,23 @@ if scenario.get("OMIT_ARTIFACT") != "findings.manifest":
                 ),
                 (
                     {"SECOND_TEST": "shared"},
-                    "exploit test reused by VULN-002",
+                    "exploit-test path for VULN-002 must match ",
                 ),
                 (
                     {"SECOND_TEST": "hardlink"},
                     "exploit test reused by VULN-002",
+                ),
+                (
+                    {"SECOND_TEST": "swapped"},
+                    "exploit-test path for VULN-001 must match ",
+                ),
+                (
+                    {"WRONG_TEST_ID": "1"},
+                    "exploit-test path for VULN-001 must match ",
+                ),
+                (
+                    {"PLATFORM_ROLLUP": "1", "WRONG_TEST_ID": "1"},
+                    "exploit-test path for VULN-PLATFORM-AUTHN must match ",
                 ),
                 ({"OMIT_RESULT": "nav"}, "missing scan result: sg-1_nav_results.md"),
                 (
@@ -549,7 +578,7 @@ if scenario.get("OMIT_ARTIFACT") != "findings.manifest":
                 (
                     {"BROKEN_REPORT_LINK": "1"},
                     "README.md does not link finding artifact: "
-                    "exploit_tests/VULN-001_exploit_test.py",
+                    "exploit_tests/test_vuln_001_sql_injection.py",
                 ),
             )
             for settings, expected_error in failure_cases:

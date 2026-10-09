@@ -60,7 +60,7 @@ Then for each finding, provide the full detail:
 | **Entry Point** | ... |
 | **Data Flow** | source -> ... -> sink |
 | **PoC** | [PoC](poc/VULN-NNN_description.md) |
-| **Exploit Test** | [Test](exploit_tests/test_vuln_NNN.py) — NOT RUN; include STATIC-CONFIRMED rationale |
+| **Exploit Test** | [Test](exploit_tests/test_vuln_NNN_description.py) — NOT RUN; include STATIC-CONFIRMED rationale |
 | **Fix** | [inline diff or link] |
 | **Root Cause** | [shared root cause name, if this instance is part of a sweep group] |
 | **Status** | Confirmed / Fixed / Verified |
@@ -211,7 +211,11 @@ Use `FINDING_COUNT: 0` with no additional lines for a clean report. Each entry
 must use the exact relative paths linked by the README. Do not include code
 smells, eliminated candidates, or subsumed findings as separate entries.
 Each final finding must reference its own exploit-test file; do not reuse a
-test file across manifest entries.
+test file across manifest entries. Its basename must also bind it to the finding
+ID: `VULN-001` uses `test_vuln_001_*`, `VULN-PLATFORM-AUTHN` uses
+`test_vuln_platform_authn_*`, and `VULN-PLATFORM-AUTHZ` uses
+`test_vuln_platform_authz_*`. Do not swap otherwise distinct test files between
+manifest entries.
 
 ## What NOT to Report
 

@@ -579,6 +579,20 @@ while IFS= read -r MANIFEST_LINE || [ -n "$MANIFEST_LINE" ]; do
     case "${TEST_PATH#exploit_tests/}" in
         ''|*[!A-Za-z0-9._-]*) echo "error: invalid exploit-test path for $FINDING_ID" >&2; MISSING_OUTPUT=1; continue ;;
     esac
+    case "$FINDING_ID" in
+        VULN-PLATFORM-AUTHN) TEST_ID_STEM=platform_authn ;;
+        VULN-PLATFORM-AUTHZ) TEST_ID_STEM=platform_authz ;;
+        VULN-[0-9][0-9][0-9]) TEST_ID_STEM=${FINDING_ID#VULN-} ;;
+    esac
+    EXPECTED_TEST_PREFIX="exploit_tests/test_vuln_${TEST_ID_STEM}_"
+    case "$TEST_PATH" in
+        "$EXPECTED_TEST_PREFIX"?*.*) ;;
+        *)
+            echo "error: exploit-test path for $FINDING_ID must match ${EXPECTED_TEST_PREFIX}<description>.<ext>" >&2
+            MISSING_OUTPUT=1
+            continue
+            ;;
+    esac
     while IFS= read -r PREVIOUS_TEST; do
         if [ "$TEST_PATH" = "$PREVIOUS_TEST" ] || \
             [ "$RESULT_ROOT/$TEST_PATH" -ef "$RESULT_ROOT/$PREVIOUS_TEST" ]; then
