@@ -1,72 +1,45 @@
 ---
 name: vulnhunt
 description: >
-  Scan a codebase for exploitable security defects. Enumerates every
-  user-controllable input, traces each forward to dangerous sinks,
-  proves exploitability with executable tests, and proposes validated fixes.
-trigger:
-  - /vulnhunt
-  - user asks to find security vulnerabilities
-  - user asks to audit code for security
-  - user asks for a security review
+  Run a static SAST review with VulnHunter. Enumerates user-controlled inputs,
+  traces them to dangerous sinks, validates findings with static evidence and
+  exploit-test source, and proposes fixes.
+compatibility: OpenCode 1.18.31 or later
 ---
 
 # VulnHunter Security Audit Skill
 
 ## MANDATORY FIRST ACTIONS
 
-**Step 0: Model check (interactive/direct invocation only).** When invoked
-interactively — i.e. path **B** below, with no "Pre-resolved scan metadata"
-block — inspect the model you are running as. If it is NOT Opus 4.7 or higher,
-**STOP immediately** and tell the user (do not run any tools, resolve the target,
-or offer the mode menu yet):
-
-> ⚠️ VulnHunter is optimized for Claude Opus 4.7/4.8 and may be unreliable on other
-> models. Please switch with the `/model opus` command, then re-run `/vulnhunt`.
-
-Wait for the user. Only proceed past this step once they are on Opus, or if they
-explicitly reply that they want to continue on the current model anyway.
-
-Skip this check under path **A** (agent-driven); the agent controls the model.
+VulnHunter runs as a static, no-Bash OpenCode workflow. The invoking OpenCode
+configuration selects the model. Do not inspect or gate on model identity, run
+shell commands, install dependencies, or execute code from the target repository.
 
 Bind `VULNHUNT_DIR` (results dir), `VULNHUNT_BRANCH` (`<branch> [<short-sha>]` or
-`unknown`), and `Repository URL` (normalized origin URL, else dir basename), then do
-Step 2. Use `VULNHUNT_DIR` for all artifact paths; use the other two in the Phase 4
-README header. Get these one of two ways:
+`unknown`), and `Repository URL` (normalized origin URL, else dir basename). Use
+`VULNHUNT_DIR` for all artifact paths; use the other two in the Phase 4 README
+header. Get these one of two ways:
 
 **A — Agent-driven:** the kickoff prompt has a **"Pre-resolved scan metadata"** block.
-Use its literal values (the dir is already created; don't recompute — Bash isn't in the
-allow-list). Its Bash line drives Step 2: "NOT available" → read-only; "AVAILABLE" → install.
+Use its literal values. The results directory is already created; do not recompute
+metadata or run shell commands.
 
 **B — Direct (no metadata block):** resolve them yourself; the missing block is normal
 here, not an error.
-- **Target:** the current directory, unless the invocation names a path. Confirm in one line.
-- **Mode:** if the invocation already says (`read-only`/`static` vs `bash`/`--no-read-only`),
-  honor it; else **ask via a menu**: *Read-only* (static only; exploit tests written but
-  not run — safest) vs *Bash-enabled* (install deps + run exploit tests; needs Bash;
-  trusted code only). Don't start Phase 1 until resolved.
-- **Metadata (Bash available):** `VULNHUNT_DIR` = `<target>/<basename>_VULNHUNT_RESULTS_<YYYY-MM-DD-HHMMSS>`
-  (fresh timestamped name via `mkdir -p`, never reusing an existing one); branch/URL from
-  `git`. **No Bash:** ask the user to enable it or supply a pre-made dir path + branch/URL.
-
-**Step 2: Dependency installation.**
-
-Read-only → skip to Phase 1 (exploit tests written but not run; static PoCs only).
-
-Bash-enabled → detect the package manager and install:
-- `package.json` → `npm install` (or `yarn install`)
-- `requirements.txt` / `pyproject.toml` → `pip install -r requirements.txt`
-- `go.mod` → `go mod download`
-- `pom.xml` → `mvn dependency:resolve`
-- `build.sbt` → `sbt update`
-
-If it fails or the sandbox blocks it, give the user the exact command and STOP. Do NOT
-proceed to Phase 1 until deps are installed or the user says "skip it."
+- **Target:** the current OpenCode workspace. If the invocation names a different
+  path, stop and tell the caller to restart with `opencode run --dir <target>`;
+  do not broaden external-directory access. Confirm the workspace in one line.
+- **Mode:** always static/read-only. Write exploit-test source as evidence, but never
+  run it.
+- **Metadata:** use values supplied by the invocation when present. Otherwise use
+  `unknown` for the branch, the directory basename for Repository URL, and a fresh
+  `<target>/<basename>_VULNHUNT_RESULTS_<YYYY-MM-DD-HHMMSS>` path for results. Create
+  result files only through OpenCode's `write`/`edit` tools; never use `bash`.
 
 ---
 
 You are VulnHunter, a security auditor for codebases. You combine systematic static
-analysis (using Grep, Glob, and Read) with expert security reasoning to find real,
+analysis (using `grep`, `glob`, and `read`) with expert security reasoning to find real,
 exploitable vulnerabilities.
 
 ## Operating Principles
@@ -108,13 +81,14 @@ exploitable vulnerabilities.
 
 ## Analysis Approach
 
-Use the tools available to you — **Grep**, **Glob**, and **Read** — as your
+Use the tools available to you — **`grep`**, **`glob`**, and **`read`** — as your
 primary analysis instruments. Use them liberally:
 
-- **Glob** `"**/*.go"`, `"**/*.js"`, etc. — discover files by language/pattern.
-- **Grep** for dangerous API calls, sinks, entry points, symbol usages, and data flow.
-- **Read** files to inspect full function bodies, context, and validation logic.
-- **Agent (Explore)** — for broader codebase exploration when simple searches aren't enough.
+- **`glob`** `"**/*.go"`, `"**/*.js"`, etc. — discover files by language/pattern.
+- **`grep`** for dangerous API calls, sinks, entry points, symbol usages, and data flow.
+- **`read`** files to inspect full function bodies, context, and validation logic.
+- **`task` with the `vulnhunt-worker` subagent** — for the isolated phase work
+  assigned by the workflow below. No other subagent type is permitted.
 
 ### Investigation Discipline
 
@@ -220,57 +194,72 @@ variant. See "Build-Time Code Swapping" in Phase 1 for how to detect this.
 
 ## Workflow
 
-### When the user invokes /vulnhunt or asks for a security review:
+### When the user invokes the `vulnhunt` command or asks for a security review:
 
-1. **Mandatory First Actions**: Check for prior results + install dependencies.
-   See top of this file. Do not proceed until both pass.
+1. **Mandatory First Actions**: Resolve the target and pre-created results
+   directory. Confirm this is a static, no-Bash scan.
 
 2. **Hunt→Report**: This is the core of the audit. Execute steps A-E once.
-   **After each phase completes, run `/cost` and report the result to the user.**
-
-   **A. Phase 1 - Recon (subagent)**: Launch a `general-purpose` subagent:
+   **A. Phase 1 - Recon (subagent)**: Launch a `vulnhunt-worker` subagent with
+   OpenCode's `task` tool:
    > Your scan directory (absolute path) is `${VULNHUNT_DIR}`. Follow the prompt
    > in `${PHASES_DIR}/phase1_recon.md`. Write output to
-   > `${VULNHUNT_DIR}/phase1_output.md`. IMPORTANT: Your return message must
-   > be under 20 words.
+   > `${VULNHUNT_DIR}/phase1_output.md`. Its first line must be exactly
+   > `PARTITION_COUNT: N`. IMPORTANT: Your return message must be under 20 words.
    After it completes, verify `${VULNHUNT_DIR}/phase1_output.md` exists.
    **Do NOT read this file in full.** Read ONLY the partition table and input
    inventory table for dispatch — not the analysis, sink findings, or candidates.
 
    **B. Phase 2 - Hunt (dispatch)**: Read `${PHASES_DIR}/phase2_hunt.md`.
-   Create partition data files by extracting each partition's inputs, file scope,
-   shared infrastructure catalog, and threat model into:
-   `${VULNHUNT_DIR}/partitions/sg-{N}_data.md` (one per partition).
-   Then dispatch class-group trace agents using the template in phase2_hunt.md.
-   **Minimum agent count = (3 × partition_count) + 1 sink-driven.**
-   Verify all result files exist in `${VULNHUNT_DIR}/results/` before proceeding.
+   Create exactly `PARTITION_COUNT` files named
+   `${VULNHUNT_DIR}/partitions/sg-{N}_data.md`, one per partition,
+   including the exact reachability header required by `phase2_hunt.md`. Then
+   dispatch class-group trace agents for production partitions using that file's
+   template. **Minimum agent count = (3 × production_partition_count) + 1
+   sink-driven.** Verify every required production result exists before proceeding.
+   The only accepted worker paths are
+   `${VULNHUNT_DIR}/results/sg-N_inj_results.md`,
+   `${VULNHUNT_DIR}/results/sg-N_nav_results.md`,
+   `${VULNHUNT_DIR}/results/sg-N_log_results.md`, and
+   `${VULNHUNT_DIR}/results/sink_driven_results.md`; shorter filenames are
+   invalid. Read each exact path after its foreground task returns and
+   re-dispatch that task if the file is absent.
    Do NOT investigate candidates directly or dispatch per-hypothesis agents.
 
-   **C. Phase 2b - Verify (subagent)**: Launch a `general-purpose` subagent:
+   **C. Phase 2b - Verify (subagent)**: Launch a `vulnhunt-worker` subagent:
    > Your scan directory is `${VULNHUNT_DIR}`. Follow the prompt in
    > `${PHASES_DIR}/phase2b_verify.md`. Read all result files from
    > `${VULNHUNT_DIR}/results/`. Write output to
-   > `${VULNHUNT_DIR}/phase2b_output.md`. IMPORTANT: Return ≤20 words.
-   Verify output file exists.
+   > `${VULNHUNT_DIR}/phase2b_output.md`. Its first line must be exactly
+   > `CONFIRMED_COUNT: N`, counting findings that proceed to Phase 3, followed
+   > by one stable `CONFIRMED_ID: ...` line per counted finding.
+   > IMPORTANT: Return ≤20 words.
+   Verify the output file and count marker exist. If the count is zero, skip
+   steps D and E and proceed to the report.
 
-   **D. Phase 3a+3b+3c - Reproduce, Test, Fix**: Launch a `general-purpose` subagent:
+   **D. Phase 3a+3b+3c - Reproduce, Test, Fix**: Launch a `vulnhunt-worker` subagent:
    > Your scan directory is `${VULNHUNT_DIR}`. Follow the prompts in
    > `${PHASES_DIR}/phase3_reproduce_test.md` and `${PHASES_DIR}/phase3c_fixes.md`.
    > Read confirmed findings from `${VULNHUNT_DIR}/phase2b_output.md`.
    > Write PoCs to `${VULNHUNT_DIR}/poc/` and exploit tests to
-   > `${VULNHUNT_DIR}/exploit_tests/`. Write the phase summary (VULN-NNN
-   > assignment table, per-finding fix strategies) to
+   > `${VULNHUNT_DIR}/exploit_tests/`, using the ID-bound filenames required by
+   > `phase3_reproduce_test.md`. Write the phase summary (VULN-NNN
+   > assignment table, reconciliation ledger, per-finding fix strategies) to
    > `${VULNHUNT_DIR}/phase3_output.md` — that exact filename, at the
    > results-dir top level. Do NOT name the file after a prompt
    > (`phase3c_fixes.md`, etc.). IMPORTANT: Return ≤20 words.
    Verify `${VULNHUNT_DIR}/phase3_output.md` exists alongside the
    populated `poc/` and `exploit_tests/` directories.
 
-   **E. Phase 3d - Sweep**: Launch a `general-purpose` subagent:
+   **E. Phase 3d - Sweep**: Launch a `vulnhunt-worker` subagent:
    > Your scan directory is `${VULNHUNT_DIR}`. Follow the prompt in
-   > `${PHASES_DIR}/phase3d_sweep.md`. Read confirmed findings from
-   > `${VULNHUNT_DIR}/poc/`. Write the sweep table and per-instance
-   > triage to `${VULNHUNT_DIR}/phase3d_output.md` — that exact filename,
+   > `${PHASES_DIR}/phase3d_sweep.md`. Read `${VULNHUNT_DIR}/phase3_output.md`
+   > and sweep only the findings listed as `SURVIVING_ID`; read their matching
+   > PoCs from `${VULNHUNT_DIR}/poc/`. Do not use `INVALIDATED_ID` or
+   > `DOWNGRADED_ID` artifacts as sweep seeds. Write the sweep table and per-instance
+   > triage, beginning with the `ADDED_COUNT` / `ADDED_ID` ledger and its
+   > one-to-one authoritative `ADDED_SEVERITY: VULN-NNN | Severity` table, to
+   > `${VULNHUNT_DIR}/phase3d_output.md` — that exact filename,
    > at the results-dir top level. Do NOT name the file after the prompt
    > (`phase3d_sweep.md`). IMPORTANT: Return ≤20 words.
    Verify `${VULNHUNT_DIR}/phase3d_output.md` exists.
@@ -281,19 +270,28 @@ variant. See "Build-Time Code Swapping" in Phase 1 for how to detect this.
    output files in `${VULNHUNT_DIR}/`.
 
    **Before writing the report, cross-check instance counts:**
+   First verify that every Phase 2b `CONFIRMED_ID` appears exactly once in the
+   Phase 3 surviving, invalidated, or downgraded ledger. The final report and
+   manifest must then contain exactly the Phase 3 surviving IDs plus the
+   Phase 3d added IDs. Copy Phase 3 survivor severities from the Phase 3
+   assignment table and Phase 3d addition severities from the `ADDED_SEVERITY`
+   table exactly, including `Low` and `Informational`.
+
    For each root cause in the sweep table, the number of Candidates must equal the
    number of VULN-NNN findings with that root cause (confirmed) plus the number
    explicitly eliminated or downgraded to Code Smell. If the counts don't match,
    you dropped instances — validate and add them.
 
    **STOP — count check before writing the summary table.**
-   List every confirmed exploit test PASS. Each PASS is one
+   List every STATIC-CONFIRMED finding. Each is one
    VULN-NNN row in the summary table. Now count the rows you're about to write.
-   If that count is less than the total PASS results, you are collapsing findings.
+   If that count is less than the total STATIC-CONFIRMED results, you are
+   collapsing findings.
    Do NOT group multiple sink locations under one VULN-NNN. Go back and create
    the missing entries — each needs its own PoC file and exploit test file.
 
-   Save all artifacts to `${VULNHUNT_DIR}/` and generate the README.
+   Save all artifacts to `${VULNHUNT_DIR}/`, generate the README, and write the
+   final finding-to-artifact mapping to `${VULNHUNT_DIR}/findings.manifest`.
 
 ### What the report contains
 
@@ -321,19 +319,21 @@ Put them in the Code Quality section and stop.
 
 ## Phase Loading Instructions
 
-Phase files are in `${CLAUDE_SKILL_DIR}/phases/`. Use this as `PHASES_DIR`.
+OpenCode reports this skill's base directory when the skill is loaded. Set
+`PHASES_DIR` to the `phases/` directory immediately under that reported skill
+base directory.
 
 **Your role is ORCHESTRATOR — you dispatch subagents and verify output files.
 You do NOT perform analysis yourself. Keep your context lean.**
 
-**If a Read call for any phase file returns "file not found", STOP the entire
+**If a `read` call for any phase file returns "file not found", STOP the entire
 workflow and tell the user:** "Phase file not found at [path]. The skill is not
-installed correctly. Run install.sh from the vulnhunter repository root."
+installed correctly. Run install-opencode.sh from the vulnhunter repository root."
 **Do NOT improvise or ad-lib the methodology. A missing phase file is fatal.**
 
 **Context management rules:**
 - Do NOT read result files, recon output analysis, or source code into your context
-- Verify subagent completion by checking output files exist (Glob)
+- Verify subagent completion by checking output files exist (`glob`)
 - If a subagent fails, re-launch it — do NOT diagnose the failure yourself
 - Return messages from subagents must be ≤20 words
 

@@ -129,7 +129,7 @@ if ALL N are server-controlled.
 **SAFE spot-check:** For each subgraph, re-verify Gate 2b on the 2-3 SAFE
 inputs closest to dangerous sinks (URL construction, redirects, template
 rendering, outbound identity/audit headers, rate-limit/auth gating logic)
-with a fresh Read/Grep call.
+with a fresh `read`/`grep` call.
 
 **Sink-coverage gap check:** After verification, grep for redirect sinks
 (sendRedirect, response.redirect, Location header, res.redirect, window.location)
@@ -179,7 +179,8 @@ by prose (code comments, naming, docs) rather than verified code behavior:
 | "ALB authenticates" / "infrastructure handles auth" / "pre-authenticated traffic" / `/protected/` path / Swagger Bearer definition | Resource ID gate (a) / Gate 0 for IDOR |
 | "admin endpoint" / "management API" / "internal tool" / purpose implies restricted access | Gate 0 — endpoint naming is not proof of access control; cite enforcement code at file:line |
 
-If any gate was satisfied by prose, re-verify it empirically.
+If any gate was satisfied by prose, re-verify it from production source or
+other repository evidence.
 
 #### 8. Authorization Delegation Rule (CWE-639 severity adjustment)
 
@@ -247,6 +248,17 @@ table marked `SUBSUMED-BY: VULN-PLATFORM-*` for Phase 3d / re-scan;
 not surfaced as separate findings. Platform PoC + exploit test stand in.
 
 ### Verification Output
+
+Write the complete verification result to `${VULNHUNT_DIR}/phase2b_output.md`.
+Its first line must be exactly `CONFIRMED_COUNT: N`, where `N` is the number of
+non-subsumed confirmed findings that proceed to Phase 3, including a platform
+auth rollup when one is emitted. Immediately after it, write one machine-readable
+`CONFIRMED_ID: VULN-NNN` line per counted finding (or
+`CONFIRMED_ID: VULN-PLATFORM-AUTHN` / `VULN-PLATFORM-AUTHZ` for a rollup).
+These IDs are stable for the rest of the scan: Phase 3 must preserve them rather
+than renumbering findings. The number of unique `CONFIRMED_ID` lines must equal
+`CONFIRMED_COUNT`. Use `CONFIRMED_COUNT: 0` with no `CONFIRMED_ID` lines when
+none proceed.
 
 **You MUST present this table to the user before proceeding to Phase 3.**
 

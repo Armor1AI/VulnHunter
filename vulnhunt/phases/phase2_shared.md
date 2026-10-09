@@ -148,7 +148,7 @@ Your class-specific file may contain additional Gate 0 exemptions for your
 vulnerability class. Apply those after this generic Gate 0 evaluation.
 
 **Gate 1: Is the code reachable?**
-Use the **Grep tool** to search for all call sites of the suspect symbol across
+Use the **`grep` tool** to search for all call sites of the suspect symbol across
 the codebase. Use the `glob` parameter to restrict to production source file
 extensions and exclude test directories.
 
@@ -205,10 +205,10 @@ first one sanitizes input, you MUST check the other N-1. A safe caller does NOT
 clear the finding — only proving ALL callers sanitize clears it. Each unsanitized
 caller is a separate finding.
 
-**Empirically verify what the defense does — do NOT rely on your training
-knowledge.** Your training data about library behavior may be wrong, stale, or
-incomplete. For EVERY defense (sanitizer, middleware, framework feature) in the
-data flow, you MUST:
+**Verify what the defense does from repository evidence — do NOT rely on your
+training knowledge.** Your training data about library behavior may be wrong,
+stale, or incomplete. For EVERY defense (sanitizer, middleware, framework
+feature) in the data flow, you MUST:
   - **(a)** Read the defense's source code and confirm it actually blocks the
     attack, OR
   - **(b)** If the source is unavailable, **treat the defense as ineffective** —
@@ -223,14 +223,13 @@ insufficient.
 
 - **Language-level auto-sanitization**: Does the language/framework auto-prevent
   this? (e.g., ORM parameterization, template auto-escaping, type constraints).
-  Apply the same empirical standard — read the framework source to verify it
+  Apply the same evidence standard — read the framework source to verify it
   covers this specific context.
 - **Database constraints as mitigations**: Foreign keys, UNIQUE constraints,
   column type enforcement, CHECK constraints — verify by reading schema.
 
-For INJ-class findings, your class file contains the full sanitizer verification
-methodology (options a/b/c with executable test construction). Use that expanded
-procedure for injection sinks.
+For INJ-class findings, your class file contains the full static sanitizer
+verification methodology. Use that expanded procedure for injection sinks.
 
 If effective, context-matched defense exists between source and sink, the finding
 is eliminated. If not, proceed to Gate 3.
@@ -290,7 +289,7 @@ Assessment."
 After passing all gates, complete the investigation:
 
 **Document the full data flow** from input source to vulnerable sink, using the
-forward trace already performed during hunting. Use the **Grep tool** to verify
+forward trace already performed during hunting. Use the **`grep` tool** to verify
 any steps you're uncertain about. The documented flow must include file:line at
 each step and confirm the data propagates without sanitization.
 

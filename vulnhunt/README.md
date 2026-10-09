@@ -1,48 +1,58 @@
-# VulnHunter (`/vulnhunt`)
+# VulnHunter for OpenCode (`vulnhunt`)
 
-The core VulnHunter scanner skill for [Claude Code](https://docs.claude.com/en/docs/claude-code).
+The core VulnHunter scanner skill for [OpenCode](https://opencode.ai/).
 It maps every user-controllable input in a codebase, traces each one *forward*
 to dangerous sinks, runs an adversarial pipeline to disprove weak candidates,
-and emits only findings it can back with an executable proof-of-concept and a
-proposed fix. This is a **prompt-only** skill — `SKILL.md` plus the phase files
+and emits only findings it can back with a static proof, exploit-test source,
+and a proposed fix. This is a **prompt-only** skill — `SKILL.md` plus the phase files
 under `phases/`; there is no Python package to install.
 
 ## Install
 
-This skill ships as part of the [VulnHunter](https://github.com/capitalone/vulnhunter)
-repository. From the repository root, run the shared installer to copy all skills
-(including this one) into `~/.claude/skills/`:
+From the repository root, install the scanner, OpenCode command, and restricted
+agents into `~/.config/opencode/`:
 
 ```bash
-./install.sh      # installs vulnhunt, vulnhunt-fix-verify, and vulnhunter-fix
-./uninstall.sh    # removes them
+./install-opencode.sh
+./uninstall-opencode.sh
 ```
 
-`install.sh` copies files directly (rather than symlinking) — symlinks break
-`find`/`glob` inside subagents. Re-run `./install.sh` after editing any skill
-file to refresh the installed copy.
+On Windows:
 
-> **Run on Opus.** The falsification discipline that keeps false positives low
-> depends on frontier Opus-class reasoning. You supply your own model access.
+```bat
+install-opencode.cmd
+uninstall-opencode.cmd
+```
+
+The installer copies files rather than symlinking them. Re-run it after pulling
+or editing the scanner.
 
 ## Usage
 
-```bash
-claude --model opus \
-       --add-dir ~/.claude/skills/vulnhunt \
-       --add-dir ~/.claude/skills/vulnhunt/phases
+From the repository root, scan a clean committed checkout through the isolated
+launcher:
 
-# then inside the Claude Code session:
-/vulnhunt
+```bash
+./run-opencode.sh /path/to/repository
 ```
 
-The scan writes its artifacts to a `*_VULNHUNT_RESULTS_*` directory (report
-`README.md`, executable PoCs, and exploit tests). VulnHunter **never modifies
-the target codebase** — fix strategies are documented, not applied.
+The launcher ignores target `export-ignore` attributes, excludes target
+search-ignore rules plus OpenCode and compatible agent/skill configuration,
+converts symlinks to inert link-target text, and uses an isolated config home.
+This prevents startup plugins and skills from the target or user config from
+loading before scanner permissions apply. It rejects submodules and Git LFS
+pointers because their contents are outside the committed tree.
+Set `OPENCODE_CONFIG` to a trusted model-only provider config.
 
-For unattended or batch operation, the [`vulnhunter-agent/`](../vulnhunter-agent/README.md)
-runtime wraps this skill headlessly and the [`harness/`](../harness/README.md)
-drives it across many repositories.
+The scan writes its artifacts to a `*_VULNHUNT_RESULTS_*` directory in the
+isolated workspace (report `README.md`, finding manifest, static PoCs, and
+exploit-test source).
+It does not modify the target checkout.
+
+Automated callers may pre-create the results directory and pass its path,
+repository URL, and branch in a `Pre-resolved scan metadata` block. The existing
+`vulnhunter-agent/` and `harness/` remain Claude-specific and are not used by
+the OpenCode scanner.
 
 ## Design: dispatcher + phase subagents
 
@@ -55,7 +65,7 @@ methodology instead of improvised analysis.
 | Phase | File | Responsibility |
 |-------|------|----------------|
 | 1 · Recon | `phases/phase1_recon.md` | Build the input inventory, partition the codebase, annotate production reachability. |
-| 2 · Hunt | `phases/phase2_hunt.md` + `phase2_class_{inj,nav,log}.md` | Parallel class agents (injection / navigation-&-access / logic-&-crypto) trace inputs to sinks per partition, plus one sink-driven audit agent. |
+| 2 · Hunt | `phases/phase2_hunt.md` + `phase2_class_{inj,nav,log}.md` | Restricted class agents trace inputs to sinks sequentially, followed by a sink-driven audit. |
 | 2b · Verify | `phases/phase2b_verify.md` | Adversarial pass that tries to *disprove* each candidate; ~half are eliminated. |
 | 3 · Reproduce | `phases/phase3_reproduce_test.md` + `phase3c_fixes.md` | Write PoCs, executable exploit tests, and fix strategies. |
 | 3d · Sweep | `phases/phase3d_sweep.md` | Grep every confirmed root-cause pattern across the whole codebase. |
@@ -66,11 +76,10 @@ it is cached across the parallel dispatch.
 
 ## Requirements
 
-- The [Claude Code CLI](https://docs.claude.com/en/docs/claude-code),
-  authenticated, running on an Opus model.
-- No Python, no network — the skill is read-only over the target checkout by
-  default. (The agent runtime can opt into `--no-read-only --enable-bash` to run
-  exploit tests; interactive use stays static.)
+- OpenCode 1.18.31 or later with a configured model.
+- A clean Git checkout plus `git`, `tar`, and `readlink` for the isolated launcher.
+- Python is not required. The provided agents deny `bash`, network tools, and
+  edits outside `*_VULNHUNT_RESULTS_*` directories.
 
 ## License
 

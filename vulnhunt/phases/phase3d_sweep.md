@@ -1,6 +1,7 @@
 # Phase 3d: Sweep Verification
 
-> **Context**: All confirmed findings have passing exploit tests and proposed fixes.
+> **Context**: Phase 3 has reconciled every Phase 2b confirmed finding. Only
+> findings listed as `SURVIVING_ID` have passing exploit tests and proposed fixes.
 > The orchestrator's Operating Principles and Investigation Discipline are in effect.
 
 ## Phase 3d: Sweep Verification (MANDATORY — DO NOT SKIP)
@@ -8,6 +9,13 @@
 After all findings are confirmed via exploit tests, verify that every root cause has
 been fully enumerated across the entire codebase. This prevents the pattern where one
 instance is found but 5 others are missed, requiring another audit round.
+
+Read `${VULNHUNT_DIR}/phase3_output.md` first. The authoritative sweep seeds are
+exactly its `SURVIVING_ID` entries and the matching
+`${VULNHUNT_DIR}/poc/<SURVIVING_ID>_*.md` files. PoCs may still exist for
+`INVALIDATED_ID` and `DOWNGRADED_ID` entries because Phase 3 requires an
+exploitation attempt before disposition; do not sweep those artifacts or treat
+their root causes as confirmed.
 
 **Sweep operates on the FULL codebase regardless of subgraph partitions.** A root
 cause discovered in SG-1 may have additional instances in SG-2's file scope, in files
@@ -36,7 +44,7 @@ were collapsed — expand them into separate entries before proceeding.
    The source pattern catches instances where the same construction feeds a
    different sink than the original finding.
 
-2. Use the **Grep tool** to search the entire codebase for both patterns. Use the
+2. Use the **`grep` tool** to search the entire codebase for both patterns. Use the
    `glob` parameter to target the relevant file extensions.
 
 3. **Trace callers transitively.** For each instance found, grep for all modules
@@ -83,6 +91,21 @@ Write the sweep results to `${VULNHUNT_DIR}/phase3d_output.md` — that
 exact filename, at the results-dir top level. Do NOT use the prompt
 filename (`phase3d_sweep.md`) as the output filename.
 
+Start the file with `ADDED_COUNT: N`, followed immediately by one
+`ADDED_ID: VULN-NNN` line and one authoritative
+`ADDED_SEVERITY: VULN-NNN | High+/High/Medium/Low/Informational` line for every
+new STATIC-CONFIRMED finding discovered by this sweep. The `ADDED_ID` and
+`ADDED_SEVERITY` sets must match one-to-one. Use `ADDED_COUNT: 0` with no ID or
+severity lines when the sweep adds no findings. These IDs must not reuse any
+Phase 2b `CONFIRMED_ID`. The final report manifest must contain exactly the
+Phase 3 surviving IDs plus these added IDs.
+
+The `ADDED_SEVERITY` entries are the authoritative ID/severity table for Phase
+3d findings. Assign severity only after the candidate passes the full pipeline,
+then preserve that exact spelling through Phase 4. `Low` and `Informational`
+are valid reportable severities here and must not be omitted, promoted, or
+normalized.
+
 Present this table before proceeding:
 
 | Root Cause | Grep Pattern | Total Found | Candidates | Mitigated | Dev-Only | Remaining |
@@ -107,8 +130,8 @@ For EVERY instance found by the sweep grep, triage it:
 
 Every CANDIDATE instance must go through the full finding pipeline — gates, PoC,
 and exploit test (Phases 2b, 3a, 3b) — the same as any finding discovered during
-hunting. A sweep instance is not confirmed until it has its own exploit test with
-a PASS result. Do NOT assume an instance is exploitable because it shares a root
+hunting. A sweep instance is not confirmed until it has its own exploit-test
+source and a STATIC-CONFIRMED trace. Do NOT assume an instance is exploitable because it shares a root
 cause with a confirmed finding — different call sites may have different data flows,
 different upstream validation, or different sink behavior.
 
@@ -129,6 +152,8 @@ For each CANDIDATE instance found during the sweep, apply the full pipeline:
    exemptions, Gate 2b methodology, Gate 3 "Do NOT eliminate" rules, severity
    floors) when triaging candidates of that class.
 2. **PoC** (Phase 3a format) — save to `${VULNHUNT_DIR}/poc/VULN-NNN_description.md`
-3. **Exploit Test** (Phase 3b format) — save to `${VULNHUNT_DIR}/exploit_tests/test_vuln_NNN.*`
+3. **Exploit Test** (Phase 3b format) — save numeric findings as
+   `${VULNHUNT_DIR}/exploit_tests/test_vuln_NNN_*.<ext>`; a platform rollup uses
+   `test_vuln_platform_authn_*.<ext>` or `test_vuln_platform_authz_*.<ext>`.
 
-Only instances with PASS exploit test results become VULN-NNN findings.
+Only instances with STATIC-CONFIRMED results become VULN-NNN findings.

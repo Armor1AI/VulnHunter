@@ -1,0 +1,32 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "autoupdate": false,
+  "share": "disabled",
+  "formatter": false,
+  "lsp": false,
+  "plugin": [],
+  "mcp": {},
+  "permission": {
+    "*": "deny",
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "external_directory": {
+      "*": "deny",
+      "~/.config/opencode/skills/vulnhunt/**": "allow"
+    },
+    "edit": {
+      "*": "deny",
+      "*_VULNHUNT_RESULTS_*/**": "allow",
+      "**/*_VULNHUNT_RESULTS_*/**": "allow"
+    },
+    "task": {
+      "*": "deny",
+      "vulnhunt-worker": "allow"
+    },
+    "skill": {
+      "*": "deny",
+      "vulnhunt": "allow"
+    }
+  }
+}
