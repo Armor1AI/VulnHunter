@@ -217,6 +217,13 @@ variant. See "Build-Time Code Swapping" in Phase 1 for how to detect this.
    dispatch class-group trace agents for production partitions using that file's
    template. **Minimum agent count = (3 × production_partition_count) + 1
    sink-driven.** Verify every required production result exists before proceeding.
+   The only accepted worker paths are
+   `${VULNHUNT_DIR}/results/sg-N_inj_results.md`,
+   `${VULNHUNT_DIR}/results/sg-N_nav_results.md`,
+   `${VULNHUNT_DIR}/results/sg-N_log_results.md`, and
+   `${VULNHUNT_DIR}/results/sink_driven_results.md`; shorter filenames are
+   invalid. Read each exact path after its foreground task returns and
+   re-dispatch that task if the file is absent.
    Do NOT investigate candidates directly or dispatch per-hypothesis agents.
 
    **C. Phase 2b - Verify (subagent)**: Launch a `vulnhunt-worker` subagent:
@@ -250,7 +257,8 @@ variant. See "Build-Time Code Swapping" in Phase 1 for how to detect this.
    > and sweep only the findings listed as `SURVIVING_ID`; read their matching
    > PoCs from `${VULNHUNT_DIR}/poc/`. Do not use `INVALIDATED_ID` or
    > `DOWNGRADED_ID` artifacts as sweep seeds. Write the sweep table and per-instance
-   > triage, beginning with the `ADDED_COUNT` / `ADDED_ID` ledger, to
+   > triage, beginning with the `ADDED_COUNT` / `ADDED_ID` ledger and its
+   > one-to-one authoritative `ADDED_SEVERITY: VULN-NNN | Severity` table, to
    > `${VULNHUNT_DIR}/phase3d_output.md` — that exact filename,
    > at the results-dir top level. Do NOT name the file after the prompt
    > (`phase3d_sweep.md`). IMPORTANT: Return ≤20 words.
@@ -265,7 +273,9 @@ variant. See "Build-Time Code Swapping" in Phase 1 for how to detect this.
    First verify that every Phase 2b `CONFIRMED_ID` appears exactly once in the
    Phase 3 surviving, invalidated, or downgraded ledger. The final report and
    manifest must then contain exactly the Phase 3 surviving IDs plus the
-   Phase 3d added IDs.
+   Phase 3d added IDs. Copy Phase 3 survivor severities from the Phase 3
+   assignment table and Phase 3d addition severities from the `ADDED_SEVERITY`
+   table exactly, including `Low` and `Informational`.
 
    For each root cause in the sweep table, the number of Candidates must equal the
    number of VULN-NNN findings with that root cause (confirmed) plus the number

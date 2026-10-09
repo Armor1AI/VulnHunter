@@ -38,11 +38,16 @@ sets. Do not include findings discovered later by the Phase 3d sweep here.
 ## Pre-Phase 3 Completeness Check (MANDATORY)
 
 Before writing any PoC, produce a VULN-NNN assignment table mapping every
-CONFIRMED finding from Phase 2b (High+, High, and Medium severity), preserving
-the stable ID assigned by Phase 2b:
+CONFIRMED finding from Phase 2b (High+, High, Medium, and any Low or
+Informational finding permitted by the Authorization Delegation Rule),
+preserving the stable ID assigned by Phase 2b and its exact severity spelling:
 
 | VULN-NNN | Phase 2b # | Title | Severity |
 |---|---|---|---|
+
+This table is the authoritative severity source for Phase 3 survivors. Copy
+`High+`, `High`, `Medium`, `Low`, or `Informational` exactly from Phase 2b;
+do not omit, promote, demote, or normalize any reportable finding.
 
 The ledger must account for the total High+ + High + Medium CONFIRMED findings
 from Phase 2b before any documented Phase 3 disposition is applied.

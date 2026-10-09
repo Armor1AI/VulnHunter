@@ -68,6 +68,12 @@ subagent is permitted.
    wait and verify → SG-1 LOG, wait and verify → SG-2 INJ/NAV/LOG in the same
    sequence → sink-driven, wait and verify.
 
+   The required trace filename includes the literal `_results.md` suffix:
+   `${VULNHUNT_DIR}/results/sg-{SG_ID}_{class}_results.md`. A shorter name such
+   as `sg-1_inj.md` is invalid. After each task returns, read that exact path;
+   if it does not exist, re-dispatch the same foreground worker with the exact
+   output path before continuing.
+
    - **Normal partitions**: one agent per class group (3 agents per partition).
    - **SEQUENTIAL-FALLBACK partitions**: dispatch `vulnhunt-worker` agents one at
      a time, iterating through class groups for each entry point group.
@@ -112,6 +118,8 @@ Follow the iteration rules in the shared file. For each input, return:
 - DESIGN-INTENT (input #, reason)
 
 Write results to: ${VULNHUNT_DIR}/results/sg-{SG_ID}_{class}_results.md
+This exact filename is mandatory. Do not shorten it to `sg-{SG_ID}_{class}.md`
+or use any other results filename.
 Do not return until that file exists, even when there are no candidates.
 
 IMPORTANT: Your return message must be under 20 words.
@@ -208,8 +216,9 @@ For each finding, return the candidate format used by trace agents (but do
 NOT assign VULN-NNN IDs). Include gate results where applicable.
 
 Write all results to: ${VULNHUNT_DIR}/results/sink_driven_results.md
-Do not create another results filename. If there are no candidates, write that
-conclusion to the required file. Do not return until the file exists.
+This exact filename, including `_results`, is mandatory. Do not shorten it to
+`sink_driven.md` or create another results filename. If there are no candidates,
+write that conclusion to the required file. Do not return until the file exists.
 
 IMPORTANT: Your return message must be under 20 words.
 ```

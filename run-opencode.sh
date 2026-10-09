@@ -267,7 +267,8 @@ if [ ! -f "$PHASE1_OUTPUT" ] || [ -L "$PHASE1_OUTPUT" ] || [ ! -s "$PHASE1_OUTPU
     echo "error: scan incomplete; workspace preserved at $WORKSPACE" >&2
     exit 1
 fi
-IFS= read -r PARTITION_HEADER < "$PHASE1_OUTPUT" || PARTITION_HEADER=
+PARTITION_HEADER=
+IFS= read -r PARTITION_HEADER < "$PHASE1_OUTPUT" || :
 case "$PARTITION_HEADER" in
     "PARTITION_COUNT: "*) PARTITION_COUNT=${PARTITION_HEADER#PARTITION_COUNT: } ;;
     *)
@@ -296,7 +297,8 @@ for PARTITION in "$RESULT_ROOT"/partitions/sg-*_data.md; do
     ACTUAL_PARTITIONS=$((ACTUAL_PARTITIONS + 1))
     PARTITION_ID=${PARTITION##*/sg-}
     PARTITION_ID=${PARTITION_ID%_data.md}
-    IFS= read -r REACHABILITY < "$PARTITION" || REACHABILITY=
+    REACHABILITY=
+    IFS= read -r REACHABILITY < "$PARTITION" || :
     case "$REACHABILITY" in
         "REACHABILITY: DEV-ONLY") continue ;;
         "REACHABILITY: PRODUCTION") ;;
@@ -338,7 +340,8 @@ if [ "$MISSING_OUTPUT" -ne 0 ]; then
 fi
 
 PHASE2B_OUTPUT="$RESULT_ROOT/phase2b_output.md"
-IFS= read -r CONFIRMED_HEADER < "$PHASE2B_OUTPUT" || CONFIRMED_HEADER=
+CONFIRMED_HEADER=
+IFS= read -r CONFIRMED_HEADER < "$PHASE2B_OUTPUT" || :
 case "$CONFIRMED_HEADER" in
     "CONFIRMED_COUNT: "*) CONFIRMED_COUNT=${CONFIRMED_HEADER#CONFIRMED_COUNT: } ;;
     *)
@@ -425,6 +428,87 @@ extract_contract_ids() {
     fi
 }
 
+extract_added_severities() {
+    EAS_INPUT=$1
+    EAS_OUTPUT=$2
+    EAS_RAW="$EAS_OUTPUT.raw"
+    if ! awk '
+        BEGIN { prefix = "ADDED_SEVERITY: "; bad = 0 }
+        index($0, "ADDED_SEVERITY:") == 1 {
+            if (index($0, prefix) != 1) {
+                bad = 1
+                next
+            }
+            value = substr($0, length(prefix) + 1)
+            separator = index(value, " | ")
+            if (separator == 0) {
+                bad = 1
+                next
+            }
+            id = substr(value, 1, separator - 1)
+            severity = substr(value, separator + 3)
+            if (id !~ /^(VULN-[0-9][0-9][0-9]|VULN-PLATFORM-AUTHN|VULN-PLATFORM-AUTHZ)$/ ||
+                severity !~ /^(High\+|High|Medium|Low|Informational)$/) {
+                bad = 1
+                next
+            }
+            print id "|" severity
+        }
+        END { if (bad) exit 1 }
+    ' "$EAS_INPUT" > "$EAS_RAW"; then
+        echo "error: invalid ADDED_SEVERITY entry in ${EAS_INPUT##*/}" >&2
+        : > "$EAS_OUTPUT"
+        return 1
+    fi
+    sort -u "$EAS_RAW" > "$EAS_OUTPUT"
+    EAS_RAW_COUNT=$(awk 'END { print NR }' "$EAS_RAW")
+    EAS_UNIQUE_COUNT=$(awk 'END { print NR }' "$EAS_OUTPUT")
+    if [ "$EAS_RAW_COUNT" -ne "$EAS_UNIQUE_COUNT" ]; then
+        echo "error: duplicate ADDED_SEVERITY entry in ${EAS_INPUT##*/}" >&2
+        return 1
+    fi
+}
+
+extract_report_severities() {
+    ERS_INPUT=$1
+    ERS_OUTPUT=$2
+    if ! awk -F '|' '
+        function trim(value) {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+            return value
+        }
+        BEGIN { in_summary = 0; bad = 0 }
+        {
+            first = trim($2)
+            fourth = trim($5)
+            if (first == "ID" && fourth == "Severity") {
+                in_summary = 1
+                next
+            }
+            if (!in_summary) next
+            if ($0 !~ /^\|/) {
+                if ($0 !~ /^[[:space:]]*$/) in_summary = 0
+                next
+            }
+            if (first ~ /^:?-+:?$/) next
+            if (first !~ /^(VULN-[0-9][0-9][0-9]|VULN-PLATFORM-AUTHN|VULN-PLATFORM-AUTHZ)$/) {
+                in_summary = 0
+                next
+            }
+            if (fourth !~ /^(High\+|High|Medium|Low|Informational)$/) {
+                bad = 1
+                next
+            }
+            print first "|" fourth
+        }
+        END { if (bad) exit 1 }
+    ' "$ERS_INPUT" > "$ERS_OUTPUT"; then
+        echo "error: invalid severity in README summary table" >&2
+        : > "$ERS_OUTPUT"
+        return 1
+    fi
+}
+
 PHASE2B_IDS="$WORK_ROOT/phase2b-confirmed-ids"
 if ! extract_contract_ids "$PHASE2B_OUTPUT" CONFIRMED_ID no "$PHASE2B_IDS"; then
     MISSING_OUTPUT=1
@@ -475,15 +559,18 @@ if [ "$CONFIRMED_COUNT" -gt 0 ]; then
         PHASE3_INVALIDATED_IDS="$WORK_ROOT/phase3-invalidated-ids"
         PHASE3_DOWNGRADED_IDS="$WORK_ROOT/phase3-downgraded-ids"
         PHASE3D_ADDED_IDS="$WORK_ROOT/phase3d-added-ids"
+        PHASE3D_ADDED_SEVERITIES="$WORK_ROOT/phase3d-added-severities"
         extract_contract_ids "$PHASE3_OUTPUT" SURVIVING_ID no "$PHASE3_SURVIVING_IDS" || RECONCILIATION_ERROR=1
         extract_contract_ids "$PHASE3_OUTPUT" INVALIDATED_ID yes "$PHASE3_INVALIDATED_IDS" || RECONCILIATION_ERROR=1
         extract_contract_ids "$PHASE3_OUTPUT" DOWNGRADED_ID yes "$PHASE3_DOWNGRADED_IDS" || RECONCILIATION_ERROR=1
         extract_contract_ids "$PHASE3D_OUTPUT" ADDED_ID no "$PHASE3D_ADDED_IDS" || RECONCILIATION_ERROR=1
+        extract_added_severities "$PHASE3D_OUTPUT" "$PHASE3D_ADDED_SEVERITIES" || RECONCILIATION_ERROR=1
 
         ACTUAL_SURVIVING=$(awk 'END { print NR }' "$PHASE3_SURVIVING_IDS")
         ACTUAL_INVALIDATED=$(awk 'END { print NR }' "$PHASE3_INVALIDATED_IDS")
         ACTUAL_DOWNGRADED=$(awk 'END { print NR }' "$PHASE3_DOWNGRADED_IDS")
         ACTUAL_ADDED=$(awk 'END { print NR }' "$PHASE3D_ADDED_IDS")
+        ACTUAL_ADDED_SEVERITIES=$(awk 'END { print NR }' "$PHASE3D_ADDED_SEVERITIES")
         if [ "$ACTUAL_SURVIVING" -ne "$SURVIVING_COUNT" ] || \
             [ "$ACTUAL_INVALIDATED" -ne "$INVALIDATED_COUNT" ] || \
             [ "$ACTUAL_DOWNGRADED" -ne "$DOWNGRADED_COUNT" ]; then
@@ -492,6 +579,16 @@ if [ "$CONFIRMED_COUNT" -gt 0 ]; then
         fi
         if [ "$ACTUAL_ADDED" -ne "$ADDED_COUNT" ]; then
             echo "error: ADDED_COUNT does not match unique ADDED_ID entries" >&2
+            RECONCILIATION_ERROR=1
+        fi
+        if [ "$ACTUAL_ADDED_SEVERITIES" -ne "$ADDED_COUNT" ]; then
+            echo "error: ADDED_COUNT does not match unique ADDED_SEVERITY entries" >&2
+            RECONCILIATION_ERROR=1
+        fi
+        cut -d '|' -f 1 "$PHASE3D_ADDED_SEVERITIES" \
+            | sort -u > "$WORK_ROOT/phase3d-severity-ids"
+        if ! cmp -s "$PHASE3D_ADDED_IDS" "$WORK_ROOT/phase3d-severity-ids"; then
+            echo "error: Phase 3d ADDED_ID and ADDED_SEVERITY entries must match one-to-one" >&2
             RECONCILIATION_ERROR=1
         fi
 
@@ -523,7 +620,8 @@ if [ "$CONFIRMED_COUNT" -gt 0 ]; then
 fi
 
 README="$RESULT_ROOT/README.md"
-IFS= read -r README_HEADER < "$README" || README_HEADER=
+README_HEADER=
+IFS= read -r README_HEADER < "$README" || :
 if [ "$README_HEADER" != "# VulnHunter Security Audit Report" ]; then
     echo "error: README.md has an invalid report header" >&2
     MISSING_OUTPUT=1
@@ -644,6 +742,18 @@ if [ "$CONFIRMED_COUNT" -gt 0 ] && [ "$RECONCILIATION_READY" -eq 1 ]; then
     sort -u "$MANIFEST_IDS" > "$WORK_ROOT/sorted-manifest-ids"
     if ! cmp -s "$WORK_ROOT/expected-manifest-ids" "$WORK_ROOT/sorted-manifest-ids"; then
         echo "error: final manifest must equal Phase 3 survivors plus Phase 3d additions" >&2
+        MISSING_OUTPUT=1
+    fi
+    README_SEVERITIES="$WORK_ROOT/readme-severities"
+    if extract_report_severities "$README" "$README_SEVERITIES"; then
+        awk -F '|' 'NR == FNR { wanted[$1] = 1; next } $1 in wanted { print }' \
+            "$PHASE3D_ADDED_IDS" "$README_SEVERITIES" \
+            | sort > "$WORK_ROOT/readme-added-severities"
+        if ! cmp -s "$PHASE3D_ADDED_SEVERITIES" "$WORK_ROOT/readme-added-severities"; then
+            echo "error: README must preserve every Phase 3d ADDED_SEVERITY exactly" >&2
+            MISSING_OUTPUT=1
+        fi
+    else
         MISSING_OUTPUT=1
     fi
 fi

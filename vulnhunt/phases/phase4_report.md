@@ -24,12 +24,15 @@ Phase 3d `ADDED_ID`. Do not report Phase 3 `INVALIDATED_ID` or `DOWNGRADED_ID`
 entries as vulnerabilities. Every Phase 2b `CONFIRMED_ID` must already be
 accounted for exactly once by Phase 3 as surviving, invalidated, or downgraded.
 
-**Severity is immutable at this stage.** Copy each finding's exact severity from
-the Phase 3 assignment table. Do not reclassify or normalize it; in particular,
-`High+` must remain `High+` in the summary count, summary row, and finding detail.
-The header must contain exactly one `Findings Summary` line, computed directly
-from those Phase 3 severities. Do not emit a draft, alternative count, qualifier,
-or correction before or after it.
+**Severity is immutable at this stage.** For Phase 3 survivors, copy each
+finding's exact severity from the Phase 3 assignment table. For Phase 3d
+additions, copy it from the authoritative `ADDED_SEVERITY` table in
+`phase3d_output.md`. Do not reclassify or normalize any severity; in particular,
+`High+` must remain `High+`, and `Low` or `Informational` Phase 3d additions must
+remain present with that exact severity in the summary count, summary row, and
+finding detail. The header must contain exactly one `Findings Summary` line,
+computed directly from the two authoritative tables. Do not emit a draft,
+alternative count, qualifier, or correction before or after it.
 
 **Universal Auth Gap exception**: if Phase 2b §9 emitted
 `VULN-PLATFORM-AUTHN` or `VULN-PLATFORM-AUTHZ`, that row leads the
@@ -210,6 +213,15 @@ VULN-001|poc/VULN-001_sql_injection.md|exploit_tests/test_vuln_001_sql_injection
 Use `FINDING_COUNT: 0` with no additional lines for a clean report. Each entry
 must use the exact relative paths linked by the README. Do not include code
 smells, eliminated candidates, or subsumed findings as separate entries.
+
+**This is a strict plain-text machine-readable file, not Markdown.**
+Its first byte must be the `F` in `FINDING_COUNT`; do not add a title, explanation,
+blank line, BOM, list marker, or code fence before it. After writing the file,
+read it back and verify that its first line is exactly `FINDING_COUNT: N`, that `N`
+equals the number of following entry lines, and that those entries contain
+exactly the reconciled Phase 3 survivors plus Phase 3d additions. If any check
+fails, rewrite the complete file and verify it again before reporting completion.
+
 Each final finding must reference its own exploit-test file; do not reuse a
 test file across manifest entries. Its basename must also bind it to the finding
 ID: `VULN-001` uses `test_vuln_001_*`, `VULN-PLATFORM-AUTHN` uses

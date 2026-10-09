@@ -287,8 +287,8 @@ else:
     partition_count = scenario.get("PARTITION_COUNT_OVERRIDE", "2")
     (results / "phase1_output.md").write_text(f"PARTITION_COUNT: {partition_count}\\n")
     (results / "partitions").mkdir()
-    (results / "partitions/sg-1_data.md").write_text("REACHABILITY: PRODUCTION\\n")
-    (results / "partitions/sg-2_data.md").write_text("REACHABILITY: DEV-ONLY\\n")
+    (results / "partitions/sg-1_data.md").write_text("REACHABILITY: PRODUCTION")
+    (results / "partitions/sg-2_data.md").write_text("REACHABILITY: DEV-ONLY")
     for class_name in ("inj", "nav", "log"):
         if scenario.get("OMIT_RESULT") == class_name:
             continue
@@ -309,6 +309,8 @@ if scenario.get("OMIT_ARTIFACT") != "phase2b_output.md":
     phase2b = f"CONFIRMED_COUNT: {confirmed}\\n"
     if scenario.get("OMIT_CONFIRMED_IDS") != "1":
         phase2b += "".join(f"CONFIRMED_ID: {item}\\n" for item in confirmed_ids)
+    if scenario.get("NO_PHASE2B_NEWLINE") == "1":
+        phase2b = phase2b.rstrip("\\n")
     (results / "phase2b_output.md").write_text(phase2b)
 
 if confirmed:
@@ -342,8 +344,23 @@ if confirmed:
         and scenario.get("UNDECLARED_ADDITION") != "1"
         else []
     )
-    phase3d = f"ADDED_COUNT: {len(added_ids)}\\n" + "".join(
-        f"ADDED_ID: {item}\\n" for item in added_ids
+    added_severity = scenario.get("ADDED_SEVERITY", "Low")
+    phase3d = (
+        f"ADDED_COUNT: {len(added_ids)}\\n"
+        + "".join(f"ADDED_ID: {item}\\n" for item in added_ids)
+        + (
+            ""
+            if scenario.get("OMIT_ADDED_SEVERITY") == "1"
+            else "".join(
+                f"ADDED_SEVERITY: {item} | {added_severity}\\n"
+                for item in added_ids
+            )
+        )
+        + (
+            "ADDED_SEVERITY: VULN-002 | Medium\\n"
+            if scenario.get("CONFLICTING_ADDED_SEVERITY") == "1"
+            else ""
+        )
     )
     if scenario.get("OMIT_ARTIFACT") != "phase3_output.md":
         (results / "phase3_output.md").write_text(phase3)
@@ -371,8 +388,10 @@ if confirmed:
     )
     report = (
         "# VulnHunter Security Audit Report\\n\\n"
-        "| ID | Evidence |\\n|---|---|\\n"
-        f"| {finding_id} | [PoC]({poc}) \\\\| [Test]({linked_test}) |\\n"
+        "| ID | Title | CWE | Severity | Evidence | Status |\\n"
+        "|---|---|---|---|---|---|\\n"
+        f"| {finding_id} | SQL injection | CWE-89 | High | "
+        f"[PoC]({poc}) \\\\| [Test]({linked_test}) | Confirmed |\\n"
     )
     if platform_rollup:
         report += (
@@ -397,9 +416,13 @@ if confirmed:
             (results / second_test).write_text("# swapped test\\n")
         else:
             (results / second_test).write_text("# independent test\\n")
+        report_added_severity = scenario.get(
+            "REPORT_ADDED_SEVERITY", added_severity
+        )
         report += (
-            f"| VULN-002 | [PoC]({second_poc}) "
-            f"\\\\| [Test]({second_test}) |\\n"
+            f"| VULN-002 | Path traversal | CWE-22 | "
+            f"{report_added_severity} | [PoC]({second_poc}) "
+            f"\\\\| [Test]({second_test}) | Confirmed |\\n"
         )
         manifest = (
             f"FINDING_COUNT: 2\\n{finding_id}|{poc}|{test}\\n"
@@ -469,6 +492,15 @@ if scenario.get("OMIT_ARTIFACT") != "findings.manifest":
             self.assertIsNotNone(report)
             self.assertIn("VULN-001", Path(report.group(1)).read_text())
 
+            clean_without_newline = run_scenario(
+                {"CONFIRMED_COUNT": "0", "NO_PHASE2B_NEWLINE": "1"}
+            )
+            self.assertEqual(
+                clean_without_newline.returncode,
+                0,
+                clean_without_newline.stdout + clean_without_newline.stderr,
+            )
+
             path_cases = (
                 (
                     {},
@@ -499,8 +531,25 @@ if scenario.get("OMIT_ARTIFACT") != "findings.manifest":
             self.assertEqual(missing_config.returncode, 1)
             self.assertIn("readable provider config file", missing_config.stderr)
 
-            distinct = run_scenario({"SECOND_TEST": "distinct"})
-            self.assertEqual(distinct.returncode, 0, distinct.stdout + distinct.stderr)
+            for added_severity in (
+                "High+",
+                "High",
+                "Medium",
+                "Low",
+                "Informational",
+            ):
+                with self.subTest(added_severity=added_severity):
+                    preserved = run_scenario(
+                        {
+                            "SECOND_TEST": "distinct",
+                            "ADDED_SEVERITY": added_severity,
+                        }
+                    )
+                    self.assertEqual(
+                        preserved.returncode,
+                        0,
+                        preserved.stdout + preserved.stderr,
+                    )
 
             rollup = run_scenario({"PLATFORM_ROLLUP": "1"})
             self.assertEqual(rollup.returncode, 0, rollup.stdout + rollup.stderr)
@@ -533,6 +582,30 @@ if scenario.get("OMIT_ARTIFACT") != "findings.manifest":
                 (
                     {"SECOND_TEST": "distinct", "UNDECLARED_ADDITION": "1"},
                     "final manifest must equal Phase 3 survivors plus Phase 3d additions",
+                ),
+                (
+                    {"SECOND_TEST": "distinct", "OMIT_ADDED_SEVERITY": "1"},
+                    "Phase 3d ADDED_ID and ADDED_SEVERITY entries must match one-to-one",
+                ),
+                (
+                    {"SECOND_TEST": "distinct", "ADDED_SEVERITY": "Unknown"},
+                    "invalid ADDED_SEVERITY entry in phase3d_output.md",
+                ),
+                (
+                    {
+                        "SECOND_TEST": "distinct",
+                        "ADDED_SEVERITY": "Low",
+                        "CONFLICTING_ADDED_SEVERITY": "1",
+                    },
+                    "ADDED_COUNT does not match unique ADDED_SEVERITY entries",
+                ),
+                (
+                    {
+                        "SECOND_TEST": "distinct",
+                        "ADDED_SEVERITY": "Low",
+                        "REPORT_ADDED_SEVERITY": "Medium",
+                    },
+                    "README must preserve every Phase 3d ADDED_SEVERITY exactly",
                 ),
                 (
                     {"SECOND_TEST": "shared"},
@@ -777,11 +850,17 @@ if scenario.get("OMIT_ARTIFACT") != "findings.manifest":
         self.assertNotIn("In parallel with trace agents", phase2)
         self.assertIn("results/sink_driven_results.md", phase2)
         self.assertIn("Do not return until the file exists", phase2)
+        self.assertIn("literal `_results.md` suffix", phase2)
+        self.assertIn("Do not shorten it to `sg-{SG_ID}_{class}.md`", phase2)
+        self.assertIn("Do not shorten it to", phase2)
+        self.assertIn("`sink_driven.md`", phase2)
         self.assertIn("REACHABILITY: PRODUCTION", phase2)
         self.assertIn("REACHABILITY: DEV-ONLY", phase2)
         self.assertIn("production_partition_count", phase2)
         self.assertIn("production_partition_count", skill)
         self.assertIn("PARTITION_COUNT: N", skill)
+        self.assertIn("`${VULNHUNT_DIR}/results/sg-N_inj_results.md`", skill)
+        self.assertIn("`${VULNHUNT_DIR}/results/sink_driven_results.md`", skill)
         phase1 = (REPO / "vulnhunt" / "phases" / "phase1_recon.md").read_text()
         self.assertIn("PARTITION_COUNT: 0", phase1)
 
@@ -805,15 +884,25 @@ if scenario.get("OMIT_ARTIFACT") != "findings.manifest":
         phase4 = (
             REPO / "vulnhunt" / "phases" / "phase4_report.md"
         ).read_text()
-        self.assertIn("High+, High, and Medium severity", phase3)
+        for severity in ("High+", "High", "Medium", "Low", "Informational"):
+            self.assertIn(severity, phase3)
+            self.assertIn(severity, phase4)
         self.assertIn("High+ + High + Medium CONFIRMED", phase3)
+        self.assertIn("authoritative severity source for Phase 3 survivors", phase3)
+        self.assertIn("do not omit, promote, demote, or normalize", phase3)
         self.assertIn("Severity is immutable at this stage", phase4)
         self.assertIn("`High+` must remain `High+`", phase4)
+        self.assertIn("authoritative `ADDED_SEVERITY` table", phase4)
+        self.assertIn("`Low` or `Informational` Phase 3d additions", phase4)
         self.assertIn("File creation is mandatory", phase4)
         self.assertIn("do not print the report body as the chat response", phase4)
         self.assertIn("read the beginning of that path", phase4)
         self.assertIn("copy artifact filenames exactly", phase4)
         self.assertIn("read every local artifact path linked by the README", phase4)
+        self.assertIn("strict plain-text machine-readable file", phase4)
+        self.assertIn("Its first byte must be the `F` in `FINDING_COUNT`", phase4)
+        self.assertIn("read it back and verify", phase4)
+        self.assertIn("rewrite the complete file", phase4)
 
     def test_phase3d_sweeps_only_phase3_survivors(self):
         skill = (REPO / "vulnhunt" / "SKILL.md").read_text()
@@ -827,6 +916,8 @@ if scenario.get("OMIT_ARTIFACT") != "findings.manifest":
             self.assertIn("DOWNGRADED_ID", content)
         self.assertIn("authoritative sweep seeds", phase3d)
         self.assertIn("do not sweep those artifacts", phase3d)
+        self.assertIn("authoritative ID/severity table", phase3d)
+        self.assertIn("ADDED_SEVERITY: VULN-NNN |", phase3d)
         self.assertNotIn(
             "Read confirmed findings from `${VULNHUNT_DIR}/poc/`", skill
         )

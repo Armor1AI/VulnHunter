@@ -92,10 +92,19 @@ exact filename, at the results-dir top level. Do NOT use the prompt
 filename (`phase3d_sweep.md`) as the output filename.
 
 Start the file with `ADDED_COUNT: N`, followed immediately by one
-`ADDED_ID: VULN-NNN` line for every new STATIC-CONFIRMED finding discovered by
-this sweep. Use `ADDED_COUNT: 0` with no `ADDED_ID` lines when the sweep adds no
-findings. These IDs must not reuse any Phase 2b `CONFIRMED_ID`. The final report
-manifest must contain exactly the Phase 3 surviving IDs plus these added IDs.
+`ADDED_ID: VULN-NNN` line and one authoritative
+`ADDED_SEVERITY: VULN-NNN | High+/High/Medium/Low/Informational` line for every
+new STATIC-CONFIRMED finding discovered by this sweep. The `ADDED_ID` and
+`ADDED_SEVERITY` sets must match one-to-one. Use `ADDED_COUNT: 0` with no ID or
+severity lines when the sweep adds no findings. These IDs must not reuse any
+Phase 2b `CONFIRMED_ID`. The final report manifest must contain exactly the
+Phase 3 surviving IDs plus these added IDs.
+
+The `ADDED_SEVERITY` entries are the authoritative ID/severity table for Phase
+3d findings. Assign severity only after the candidate passes the full pipeline,
+then preserve that exact spelling through Phase 4. `Low` and `Informational`
+are valid reportable severities here and must not be omitted, promoted, or
+normalized.
 
 Present this table before proceeding:
 
