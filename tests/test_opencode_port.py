@@ -294,21 +294,61 @@ else:
             continue
         (results / f"results/sg-1_{class_name}_results.md").write_text("# result\\n")
 (results / "results/sink_driven_results.md").write_text("# result\\n")
-confirmed = int(scenario.get("CONFIRMED_COUNT", "1"))
+finding_id = (
+    "VULN-PLATFORM-AUTHN"
+    if scenario.get("PLATFORM_ROLLUP") == "1"
+    else "VULN-001"
+)
+confirmed_ids = [] if scenario.get("CONFIRMED_COUNT") == "0" else [finding_id]
+if scenario.get("SECOND_CONFIRMED"):
+    confirmed_ids.append("VULN-002")
+confirmed = int(scenario.get("CONFIRMED_COUNT", str(len(confirmed_ids))))
 if scenario.get("OMIT_ARTIFACT") != "phase2b_output.md":
-    (results / "phase2b_output.md").write_text(f"CONFIRMED_COUNT: {confirmed}\\n")
+    phase2b = f"CONFIRMED_COUNT: {confirmed}\\n"
+    if scenario.get("OMIT_CONFIRMED_IDS") != "1":
+        phase2b += "".join(f"CONFIRMED_ID: {item}\\n" for item in confirmed_ids)
+    (results / "phase2b_output.md").write_text(phase2b)
 
 if confirmed:
-    for artifact in ("phase3_output.md", "phase3d_output.md"):
-        if scenario.get("OMIT_ARTIFACT") != artifact:
-            (results / artifact).write_text("# phase summary\\n")
+    surviving_ids = [finding_id]
+    invalidated_ids = []
+    downgraded_ids = []
+    disposition = scenario.get("SECOND_CONFIRMED")
+    if disposition == "invalidated":
+        invalidated_ids.append("VULN-002")
+    elif disposition == "downgraded":
+        downgraded_ids.append("VULN-002")
+    elif disposition == "surviving":
+        surviving_ids.append("VULN-002")
+    phase3 = (
+        f"SURVIVING_COUNT: {len(surviving_ids)}\\n"
+        f"INVALIDATED_COUNT: {len(invalidated_ids)}\\n"
+        f"DOWNGRADED_COUNT: {len(downgraded_ids)}\\n"
+        + "".join(f"SURVIVING_ID: {item}\\n" for item in surviving_ids)
+        + "".join(
+            f"INVALIDATED_ID: {item} | defense at app.py:1\\n"
+            for item in invalidated_ids
+        )
+        + "".join(
+            f"DOWNGRADED_ID: {item} | Code Smell; defense at app.py:1\\n"
+            for item in downgraded_ids
+        )
+    )
+    added_ids = (
+        ["VULN-002"]
+        if scenario.get("SECOND_TEST")
+        and scenario.get("UNDECLARED_ADDITION") != "1"
+        else []
+    )
+    phase3d = f"ADDED_COUNT: {len(added_ids)}\\n" + "".join(
+        f"ADDED_ID: {item}\\n" for item in added_ids
+    )
+    if scenario.get("OMIT_ARTIFACT") != "phase3_output.md":
+        (results / "phase3_output.md").write_text(phase3)
+    if scenario.get("OMIT_ARTIFACT") != "phase3d_output.md":
+        (results / "phase3d_output.md").write_text(phase3d)
     (results / "poc").mkdir()
     (results / "exploit_tests").mkdir()
-    finding_id = (
-        "VULN-PLATFORM-AUTHN"
-        if scenario.get("PLATFORM_ROLLUP") == "1"
-        else "VULN-001"
-    )
     poc = f"poc/{finding_id}_sql_injection.md"
     test = f"exploit_tests/{finding_id}_exploit_test.py"
     if scenario.get("SYMLINK_POC") == "1":
@@ -455,7 +495,28 @@ if scenario.get("OMIT_ARTIFACT") != "findings.manifest":
             rollup = run_scenario({"PLATFORM_ROLLUP": "1"})
             self.assertEqual(rollup.returncode, 0, rollup.stdout + rollup.stderr)
 
+            for disposition in ("invalidated", "downgraded"):
+                with self.subTest(disposition=disposition):
+                    reconciled = run_scenario({"SECOND_CONFIRMED": disposition})
+                    self.assertEqual(
+                        reconciled.returncode,
+                        0,
+                        reconciled.stdout + reconciled.stderr,
+                    )
+
             failure_cases = (
+                (
+                    {"SECOND_CONFIRMED": "dropped"},
+                    "Phase 3 does not reconcile every Phase 2b confirmed ID",
+                ),
+                (
+                    {"CONFIRMED_COUNT": "2"},
+                    "CONFIRMED_COUNT does not match unique CONFIRMED_ID entries",
+                ),
+                (
+                    {"SECOND_TEST": "distinct", "UNDECLARED_ADDITION": "1"},
+                    "final manifest must equal Phase 3 survivors plus Phase 3d additions",
+                ),
                 (
                     {"SECOND_TEST": "shared"},
                     "exploit test reused by VULN-002",
@@ -724,6 +785,22 @@ if scenario.get("OMIT_ARTIFACT") != "findings.manifest":
         self.assertIn("read the beginning of that path", phase4)
         self.assertIn("copy artifact filenames exactly", phase4)
         self.assertIn("read every local artifact path linked by the README", phase4)
+
+    def test_phase3d_sweeps_only_phase3_survivors(self):
+        skill = (REPO / "vulnhunt" / "SKILL.md").read_text()
+        phase3d = (
+            REPO / "vulnhunt" / "phases" / "phase3d_sweep.md"
+        ).read_text()
+
+        for content in (skill, phase3d):
+            self.assertIn("SURVIVING_ID", content)
+            self.assertIn("INVALIDATED_ID", content)
+            self.assertIn("DOWNGRADED_ID", content)
+        self.assertIn("authoritative sweep seeds", phase3d)
+        self.assertIn("do not sweep those artifacts", phase3d)
+        self.assertNotIn(
+            "Read confirmed findings from `${VULNHUNT_DIR}/poc/`", skill
+        )
 
 
 if __name__ == "__main__":

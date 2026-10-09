@@ -1,6 +1,7 @@
 # Phase 3d: Sweep Verification
 
-> **Context**: All confirmed findings have passing exploit tests and proposed fixes.
+> **Context**: Phase 3 has reconciled every Phase 2b confirmed finding. Only
+> findings listed as `SURVIVING_ID` have passing exploit tests and proposed fixes.
 > The orchestrator's Operating Principles and Investigation Discipline are in effect.
 
 ## Phase 3d: Sweep Verification (MANDATORY — DO NOT SKIP)
@@ -8,6 +9,13 @@
 After all findings are confirmed via exploit tests, verify that every root cause has
 been fully enumerated across the entire codebase. This prevents the pattern where one
 instance is found but 5 others are missed, requiring another audit round.
+
+Read `${VULNHUNT_DIR}/phase3_output.md` first. The authoritative sweep seeds are
+exactly its `SURVIVING_ID` entries and the matching
+`${VULNHUNT_DIR}/poc/<SURVIVING_ID>_*.md` files. PoCs may still exist for
+`INVALIDATED_ID` and `DOWNGRADED_ID` entries because Phase 3 requires an
+exploitation attempt before disposition; do not sweep those artifacts or treat
+their root causes as confirmed.
 
 **Sweep operates on the FULL codebase regardless of subgraph partitions.** A root
 cause discovered in SG-1 may have additional instances in SG-2's file scope, in files
@@ -82,6 +90,12 @@ were collapsed — expand them into separate entries before proceeding.
 Write the sweep results to `${VULNHUNT_DIR}/phase3d_output.md` — that
 exact filename, at the results-dir top level. Do NOT use the prompt
 filename (`phase3d_sweep.md`) as the output filename.
+
+Start the file with `ADDED_COUNT: N`, followed immediately by one
+`ADDED_ID: VULN-NNN` line for every new STATIC-CONFIRMED finding discovered by
+this sweep. Use `ADDED_COUNT: 0` with no `ADDED_ID` lines when the sweep adds no
+findings. These IDs must not reuse any Phase 2b `CONFIRMED_ID`. The final report
+manifest must contain exactly the Phase 3 surviving IDs plus these added IDs.
 
 Present this table before proceeding:
 

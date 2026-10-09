@@ -17,19 +17,37 @@ etc.):
   `${VULNHUNT_DIR}/phase3_output.md` — that exact filename, at the
   results-dir top level.
 
+Begin `phase3_output.md` with this machine-readable reconciliation ledger:
+
+```text
+SURVIVING_COUNT: N
+INVALIDATED_COUNT: N
+DOWNGRADED_COUNT: N
+SURVIVING_ID: VULN-NNN
+INVALIDATED_ID: VULN-NNN | specific static-trace reason with file:line evidence
+DOWNGRADED_ID: VULN-NNN | specific Code Smell downgrade reason with file:line evidence
+```
+
+Emit one ID line per item in each count, omitting only the ID lines for a zero
+count. Every Phase 2b `CONFIRMED_ID` must occur exactly once across the three
+sets. Do not include findings discovered later by the Phase 3d sweep here.
+
 ## Pre-Phase 3 Completeness Check (MANDATORY)
 
 Before writing any PoC, produce a VULN-NNN assignment table mapping every
-CONFIRMED finding from Phase 2b (High+, High, and Medium severity) to a sequential ID:
+CONFIRMED finding from Phase 2b (High+, High, and Medium severity), preserving
+the stable ID assigned by Phase 2b:
 
 | VULN-NNN | Phase 2b # | Title | Severity |
 |---|---|---|---|
 
-Row count MUST equal the total High+ + High + Medium CONFIRMED findings in Phase 2b.
-If fewer: you dropped findings — add them. Every row MUST receive a PoC and
-exploit-test source by end of phase. A CONFIRMED finding cannot be removed
-without a documented static trace showing the exact defense or type constraint
-that invalidates it.
+The ledger must account for the total High+ + High + Medium CONFIRMED findings
+from Phase 2b before any documented Phase 3 disposition is applied.
+Every surviving row MUST receive a PoC and exploit-test source by end of phase.
+A CONFIRMED finding can leave the surviving set only through an `INVALIDATED_ID`
+or `DOWNGRADED_ID` entry whose reason documents the exact defense or type
+constraint and supporting file:line evidence. The three ledger counts together
+MUST equal the Phase 2b `CONFIRMED_COUNT`.
 
 ## Phase 3a: Reproduce
 

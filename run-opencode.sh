@@ -350,6 +350,92 @@ case "$CONFIRMED_COUNT" in
     ''|*[!0-9]*) echo "error: phase2b_output.md has an invalid confirmed count" >&2; exit 1 ;;
 esac
 
+read_contract_count() {
+    RCC_INPUT=$1
+    RCC_LABEL=$2
+    awk -v label="$RCC_LABEL" '
+        BEGIN { prefix = label ": "; seen = 0; bad = 0 }
+        index($0, label ":") == 1 {
+            seen++
+            if (index($0, prefix) != 1) {
+                bad = 1
+                next
+            }
+            value = substr($0, length(prefix) + 1)
+            if (value !~ /^[0-9]+$/) {
+                bad = 1
+                next
+            }
+            found = value
+        }
+        END {
+            if (bad || seen != 1) exit 1
+            print found
+        }
+    ' "$RCC_INPUT"
+}
+
+extract_contract_ids() {
+    ECI_INPUT=$1
+    ECI_LABEL=$2
+    ECI_REQUIRE_REASON=$3
+    ECI_OUTPUT=$4
+    ECI_RAW="$ECI_OUTPUT.raw"
+    if ! awk -v label="$ECI_LABEL" -v require_reason="$ECI_REQUIRE_REASON" '
+        BEGIN { prefix = label ": "; bad = 0 }
+        index($0, label ":") == 1 {
+            if (index($0, prefix) != 1) {
+                bad = 1
+                next
+            }
+            value = substr($0, length(prefix) + 1)
+            if (require_reason == "yes") {
+                separator = index(value, " | ")
+                if (separator == 0) {
+                    bad = 1
+                    next
+                }
+                id = substr(value, 1, separator - 1)
+                reason = substr(value, separator + 3)
+                if (reason !~ /[^[:space:]]/) {
+                    bad = 1
+                    next
+                }
+            } else {
+                id = value
+            }
+            if (id !~ /^(VULN-[0-9][0-9][0-9]|VULN-PLATFORM-AUTHN|VULN-PLATFORM-AUTHZ)$/) {
+                bad = 1
+                next
+            }
+            print id
+        }
+        END { if (bad) exit 1 }
+    ' "$ECI_INPUT" > "$ECI_RAW"; then
+        echo "error: invalid $ECI_LABEL entry in ${ECI_INPUT##*/}" >&2
+        : > "$ECI_OUTPUT"
+        return 1
+    fi
+    sort -u "$ECI_RAW" > "$ECI_OUTPUT"
+    ECI_RAW_COUNT=$(awk 'END { print NR }' "$ECI_RAW")
+    ECI_UNIQUE_COUNT=$(awk 'END { print NR }' "$ECI_OUTPUT")
+    if [ "$ECI_RAW_COUNT" -ne "$ECI_UNIQUE_COUNT" ]; then
+        echo "error: duplicate $ECI_LABEL entry in ${ECI_INPUT##*/}" >&2
+        return 1
+    fi
+}
+
+PHASE2B_IDS="$WORK_ROOT/phase2b-confirmed-ids"
+if ! extract_contract_ids "$PHASE2B_OUTPUT" CONFIRMED_ID no "$PHASE2B_IDS"; then
+    MISSING_OUTPUT=1
+fi
+PHASE2B_ID_COUNT=$(awk 'END { print NR }' "$PHASE2B_IDS")
+if [ "$PHASE2B_ID_COUNT" -ne "$CONFIRMED_COUNT" ]; then
+    echo "error: CONFIRMED_COUNT does not match unique CONFIRMED_ID entries" >&2
+    MISSING_OUTPUT=1
+fi
+
+RECONCILIATION_READY=0
 if [ "$CONFIRMED_COUNT" -gt 0 ]; then
     for REQUIRED_OUTPUT in phase3_output.md phase3d_output.md; do
         if [ ! -f "$RESULT_ROOT/$REQUIRED_OUTPUT" ] || \
@@ -359,6 +445,81 @@ if [ "$CONFIRMED_COUNT" -gt 0 ]; then
             MISSING_OUTPUT=1
         fi
     done
+    if [ "$MISSING_OUTPUT" -eq 0 ]; then
+        PHASE3_OUTPUT="$RESULT_ROOT/phase3_output.md"
+        PHASE3D_OUTPUT="$RESULT_ROOT/phase3d_output.md"
+        RECONCILIATION_ERROR=0
+
+        if ! SURVIVING_COUNT=$(read_contract_count "$PHASE3_OUTPUT" SURVIVING_COUNT); then
+            echo "error: phase3_output.md must contain exactly one SURVIVING_COUNT: N" >&2
+            SURVIVING_COUNT=0
+            RECONCILIATION_ERROR=1
+        fi
+        if ! INVALIDATED_COUNT=$(read_contract_count "$PHASE3_OUTPUT" INVALIDATED_COUNT); then
+            echo "error: phase3_output.md must contain exactly one INVALIDATED_COUNT: N" >&2
+            INVALIDATED_COUNT=0
+            RECONCILIATION_ERROR=1
+        fi
+        if ! DOWNGRADED_COUNT=$(read_contract_count "$PHASE3_OUTPUT" DOWNGRADED_COUNT); then
+            echo "error: phase3_output.md must contain exactly one DOWNGRADED_COUNT: N" >&2
+            DOWNGRADED_COUNT=0
+            RECONCILIATION_ERROR=1
+        fi
+        if ! ADDED_COUNT=$(read_contract_count "$PHASE3D_OUTPUT" ADDED_COUNT); then
+            echo "error: phase3d_output.md must contain exactly one ADDED_COUNT: N" >&2
+            ADDED_COUNT=0
+            RECONCILIATION_ERROR=1
+        fi
+
+        PHASE3_SURVIVING_IDS="$WORK_ROOT/phase3-surviving-ids"
+        PHASE3_INVALIDATED_IDS="$WORK_ROOT/phase3-invalidated-ids"
+        PHASE3_DOWNGRADED_IDS="$WORK_ROOT/phase3-downgraded-ids"
+        PHASE3D_ADDED_IDS="$WORK_ROOT/phase3d-added-ids"
+        extract_contract_ids "$PHASE3_OUTPUT" SURVIVING_ID no "$PHASE3_SURVIVING_IDS" || RECONCILIATION_ERROR=1
+        extract_contract_ids "$PHASE3_OUTPUT" INVALIDATED_ID yes "$PHASE3_INVALIDATED_IDS" || RECONCILIATION_ERROR=1
+        extract_contract_ids "$PHASE3_OUTPUT" DOWNGRADED_ID yes "$PHASE3_DOWNGRADED_IDS" || RECONCILIATION_ERROR=1
+        extract_contract_ids "$PHASE3D_OUTPUT" ADDED_ID no "$PHASE3D_ADDED_IDS" || RECONCILIATION_ERROR=1
+
+        ACTUAL_SURVIVING=$(awk 'END { print NR }' "$PHASE3_SURVIVING_IDS")
+        ACTUAL_INVALIDATED=$(awk 'END { print NR }' "$PHASE3_INVALIDATED_IDS")
+        ACTUAL_DOWNGRADED=$(awk 'END { print NR }' "$PHASE3_DOWNGRADED_IDS")
+        ACTUAL_ADDED=$(awk 'END { print NR }' "$PHASE3D_ADDED_IDS")
+        if [ "$ACTUAL_SURVIVING" -ne "$SURVIVING_COUNT" ] || \
+            [ "$ACTUAL_INVALIDATED" -ne "$INVALIDATED_COUNT" ] || \
+            [ "$ACTUAL_DOWNGRADED" -ne "$DOWNGRADED_COUNT" ]; then
+            echo "error: Phase 3 reconciliation counts do not match their ID entries" >&2
+            RECONCILIATION_ERROR=1
+        fi
+        if [ "$ACTUAL_ADDED" -ne "$ADDED_COUNT" ]; then
+            echo "error: ADDED_COUNT does not match unique ADDED_ID entries" >&2
+            RECONCILIATION_ERROR=1
+        fi
+
+        cat "$PHASE3_SURVIVING_IDS" "$PHASE3_INVALIDATED_IDS" \
+            "$PHASE3_DOWNGRADED_IDS" | sort > "$WORK_ROOT/phase3-all-ids.raw"
+        sort -u "$WORK_ROOT/phase3-all-ids.raw" > "$WORK_ROOT/phase3-all-ids"
+        PHASE3_TOTAL=$(awk 'END { print NR }' "$WORK_ROOT/phase3-all-ids.raw")
+        PHASE3_UNIQUE=$(awk 'END { print NR }' "$WORK_ROOT/phase3-all-ids")
+        if [ "$PHASE3_TOTAL" -ne "$PHASE3_UNIQUE" ]; then
+            echo "error: a confirmed finding has multiple Phase 3 dispositions" >&2
+            RECONCILIATION_ERROR=1
+        fi
+        if ! cmp -s "$PHASE2B_IDS" "$WORK_ROOT/phase3-all-ids"; then
+            echo "error: Phase 3 does not reconcile every Phase 2b confirmed ID" >&2
+            RECONCILIATION_ERROR=1
+        fi
+
+        comm -12 "$PHASE2B_IDS" "$PHASE3D_ADDED_IDS" > "$WORK_ROOT/reused-phase3d-ids"
+        if [ -s "$WORK_ROOT/reused-phase3d-ids" ]; then
+            echo "error: Phase 3d additions must not reuse Phase 2b confirmed IDs" >&2
+            RECONCILIATION_ERROR=1
+        fi
+        if [ "$RECONCILIATION_ERROR" -eq 0 ]; then
+            RECONCILIATION_READY=1
+        else
+            MISSING_OUTPUT=1
+        fi
+    fi
 fi
 
 README="$RESULT_ROOT/README.md"
@@ -373,7 +534,9 @@ MANIFEST_COUNT=
 ACTUAL_FINDINGS=0
 SEEN_FINDINGS=
 SEEN_TESTS="$WORK_ROOT/exploit-tests"
+MANIFEST_IDS="$WORK_ROOT/manifest-ids"
 : > "$SEEN_TESTS"
+: > "$MANIFEST_IDS"
 while IFS= read -r MANIFEST_LINE || [ -n "$MANIFEST_LINE" ]; do
     if [ -z "$MANIFEST_COUNT" ]; then
         case "$MANIFEST_LINE" in
@@ -432,6 +595,7 @@ $FINDING_ID
     esac
     SEEN_FINDINGS="$SEEN_FINDINGS$FINDING_ID
 "
+    printf '%s\n' "$FINDING_ID" >> "$MANIFEST_IDS"
     for ARTIFACT in "$POC_PATH" "$TEST_PATH"; do
         if [ ! -f "$RESULT_ROOT/$ARTIFACT" ] || [ -L "$RESULT_ROOT/$ARTIFACT" ] || [ ! -s "$RESULT_ROOT/$ARTIFACT" ]; then
             echo "error: missing finding artifact: $ARTIFACT" >&2
@@ -459,6 +623,15 @@ fi
 if [ "$CONFIRMED_COUNT" -eq 0 ] && [ "${MANIFEST_COUNT:-1}" -ne 0 ]; then
     echo "error: a clean Phase 2b result cannot report findings" >&2
     MISSING_OUTPUT=1
+fi
+if [ "$CONFIRMED_COUNT" -gt 0 ] && [ "$RECONCILIATION_READY" -eq 1 ]; then
+    cat "$PHASE3_SURVIVING_IDS" "$PHASE3D_ADDED_IDS" \
+        | sort -u > "$WORK_ROOT/expected-manifest-ids"
+    sort -u "$MANIFEST_IDS" > "$WORK_ROOT/sorted-manifest-ids"
+    if ! cmp -s "$WORK_ROOT/expected-manifest-ids" "$WORK_ROOT/sorted-manifest-ids"; then
+        echo "error: final manifest must equal Phase 3 survivors plus Phase 3d additions" >&2
+        MISSING_OUTPUT=1
+    fi
 fi
 grep -Eo 'VULN-([0-9]{3}|PLATFORM-(AUTHN|AUTHZ))' "$README" \
     | sort -u > "$WORK_ROOT/readme-findings"

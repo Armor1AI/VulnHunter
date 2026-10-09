@@ -224,7 +224,8 @@ variant. See "Build-Time Code Swapping" in Phase 1 for how to detect this.
    > `${PHASES_DIR}/phase2b_verify.md`. Read all result files from
    > `${VULNHUNT_DIR}/results/`. Write output to
    > `${VULNHUNT_DIR}/phase2b_output.md`. Its first line must be exactly
-   > `CONFIRMED_COUNT: N`, counting findings that proceed to Phase 3.
+   > `CONFIRMED_COUNT: N`, counting findings that proceed to Phase 3, followed
+   > by one stable `CONFIRMED_ID: ...` line per counted finding.
    > IMPORTANT: Return ≤20 words.
    Verify the output file and count marker exist. If the count is zero, skip
    steps D and E and proceed to the report.
@@ -235,7 +236,7 @@ variant. See "Build-Time Code Swapping" in Phase 1 for how to detect this.
    > Read confirmed findings from `${VULNHUNT_DIR}/phase2b_output.md`.
    > Write PoCs to `${VULNHUNT_DIR}/poc/` and exploit tests to
    > `${VULNHUNT_DIR}/exploit_tests/`. Write the phase summary (VULN-NNN
-   > assignment table, per-finding fix strategies) to
+   > assignment table, reconciliation ledger, per-finding fix strategies) to
    > `${VULNHUNT_DIR}/phase3_output.md` — that exact filename, at the
    > results-dir top level. Do NOT name the file after a prompt
    > (`phase3c_fixes.md`, etc.). IMPORTANT: Return ≤20 words.
@@ -244,9 +245,12 @@ variant. See "Build-Time Code Swapping" in Phase 1 for how to detect this.
 
    **E. Phase 3d - Sweep**: Launch a `vulnhunt-worker` subagent:
    > Your scan directory is `${VULNHUNT_DIR}`. Follow the prompt in
-   > `${PHASES_DIR}/phase3d_sweep.md`. Read confirmed findings from
-   > `${VULNHUNT_DIR}/poc/`. Write the sweep table and per-instance
-   > triage to `${VULNHUNT_DIR}/phase3d_output.md` — that exact filename,
+   > `${PHASES_DIR}/phase3d_sweep.md`. Read `${VULNHUNT_DIR}/phase3_output.md`
+   > and sweep only the findings listed as `SURVIVING_ID`; read their matching
+   > PoCs from `${VULNHUNT_DIR}/poc/`. Do not use `INVALIDATED_ID` or
+   > `DOWNGRADED_ID` artifacts as sweep seeds. Write the sweep table and per-instance
+   > triage, beginning with the `ADDED_COUNT` / `ADDED_ID` ledger, to
+   > `${VULNHUNT_DIR}/phase3d_output.md` — that exact filename,
    > at the results-dir top level. Do NOT name the file after the prompt
    > (`phase3d_sweep.md`). IMPORTANT: Return ≤20 words.
    Verify `${VULNHUNT_DIR}/phase3d_output.md` exists.
@@ -257,6 +261,11 @@ variant. See "Build-Time Code Swapping" in Phase 1 for how to detect this.
    output files in `${VULNHUNT_DIR}/`.
 
    **Before writing the report, cross-check instance counts:**
+   First verify that every Phase 2b `CONFIRMED_ID` appears exactly once in the
+   Phase 3 surviving, invalidated, or downgraded ledger. The final report and
+   manifest must then contain exactly the Phase 3 surviving IDs plus the
+   Phase 3d added IDs.
+
    For each root cause in the sweep table, the number of Candidates must equal the
    number of VULN-NNN findings with that root cause (confirmed) plus the number
    explicitly eliminated or downgraded to Code Smell. If the counts don't match,

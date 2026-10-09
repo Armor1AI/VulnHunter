@@ -252,7 +252,13 @@ not surfaced as separate findings. Platform PoC + exploit test stand in.
 Write the complete verification result to `${VULNHUNT_DIR}/phase2b_output.md`.
 Its first line must be exactly `CONFIRMED_COUNT: N`, where `N` is the number of
 non-subsumed confirmed findings that proceed to Phase 3, including a platform
-auth rollup when one is emitted. Use `CONFIRMED_COUNT: 0` when none proceed.
+auth rollup when one is emitted. Immediately after it, write one machine-readable
+`CONFIRMED_ID: VULN-NNN` line per counted finding (or
+`CONFIRMED_ID: VULN-PLATFORM-AUTHN` / `VULN-PLATFORM-AUTHZ` for a rollup).
+These IDs are stable for the rest of the scan: Phase 3 must preserve them rather
+than renumbering findings. The number of unique `CONFIRMED_ID` lines must equal
+`CONFIRMED_COUNT`. Use `CONFIRMED_COUNT: 0` with no `CONFIRMED_ID` lines when
+none proceed.
 
 **You MUST present this table to the user before proceeding to Phase 3.**
 

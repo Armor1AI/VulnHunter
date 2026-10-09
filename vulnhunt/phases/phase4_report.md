@@ -18,6 +18,12 @@ Start the report with a summary table of all confirmed findings.
 **This table MUST have one row per STATIC-CONFIRMED finding — not one row per root cause.**
 If you have 2 root causes but 8 confirmed sink locations, the table has 8 rows.
 
+Before writing it, reconcile the machine-readable ledgers. The report and
+`findings.manifest` must contain exactly every Phase 3 `SURVIVING_ID` plus every
+Phase 3d `ADDED_ID`. Do not report Phase 3 `INVALIDATED_ID` or `DOWNGRADED_ID`
+entries as vulnerabilities. Every Phase 2b `CONFIRMED_ID` must already be
+accounted for exactly once by Phase 3 as surviving, invalidated, or downgraded.
+
 **Severity is immutable at this stage.** Copy each finding's exact severity from
 the Phase 3 assignment table. Do not reclassify or normalize it; in particular,
 `High+` must remain `High+` in the summary count, summary row, and finding detail.
