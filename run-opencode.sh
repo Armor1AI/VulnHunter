@@ -509,6 +509,86 @@ extract_report_severities() {
     fi
 }
 
+extract_report_detail_severities() {
+    ERDS_INPUT=$1
+    ERDS_OUTPUT=$2
+    if ! awk -F '|' '
+        function trim(value) {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+            return value
+        }
+        function valid_id(value) {
+            return value ~ /^(VULN-[0-9][0-9][0-9]|VULN-PLATFORM-AUTHN|VULN-PLATFORM-AUTHZ)$/
+        }
+        BEGIN { current_id = ""; bad = 0 }
+        /^### \[/ {
+            heading = substr($0, 6)
+            closing = index(heading, "]")
+            candidate = closing ? substr(heading, 1, closing - 1) : ""
+            current_id = valid_id(candidate) ? candidate : ""
+            if (current_id != "") {
+                if (seen_heading[current_id]++) bad = 1
+            }
+            next
+        }
+        current_id != "" && trim($2) == "**Severity**" {
+            severity = trim($3)
+            if (severity !~ /^(High\+|High|Medium|Low|Informational)$/ ||
+                seen_severity[current_id]++) {
+                bad = 1
+                next
+            }
+            print current_id "|" severity
+        }
+        END { if (bad) exit 1 }
+    ' "$ERDS_INPUT" > "$ERDS_OUTPUT"; then
+        echo "error: invalid severity in README finding details" >&2
+        : > "$ERDS_OUTPUT"
+        return 1
+    fi
+}
+
+extract_findings_summary_counts() {
+    EFSC_INPUT=$1
+    EFSC_OUTPUT=$2
+    if ! awk '
+        BEGIN { prefix = "**Findings Summary**: "; found = 0; bad = 0 }
+        index($0, "**Findings Summary**:") == 1 {
+            found++
+            if ($0 !~ /^\*\*Findings Summary\*\*: [0-9]+ High\+, [0-9]+ High, [0-9]+ Medium, [0-9]+ Low, [0-9]+ Informational$/) {
+                bad = 1
+                next
+            }
+            value = substr($0, length(prefix) + 1)
+            split(value, fields, ", ")
+            for (i = 1; i <= 5; i++) {
+                split(fields[i], parts, " ")
+                print substr(fields[i], length(parts[1]) + 2) "|" parts[1]
+            }
+        }
+        END { if (found != 1 || bad) exit 1 }
+    ' "$EFSC_INPUT" > "$EFSC_OUTPUT"; then
+        echo "error: README must contain exactly one valid Findings Summary line" >&2
+        : > "$EFSC_OUTPUT"
+        return 1
+    fi
+}
+
+count_report_severities() {
+    CRS_INPUT=$1
+    CRS_OUTPUT=$2
+    awk -F '|' '
+        { counts[$2]++ }
+        END {
+            print "High+|" (counts["High+"] + 0)
+            print "High|" (counts["High"] + 0)
+            print "Medium|" (counts["Medium"] + 0)
+            print "Low|" (counts["Low"] + 0)
+            print "Informational|" (counts["Informational"] + 0)
+        }
+    ' "$CRS_INPUT" > "$CRS_OUTPUT"
+}
+
 PHASE2B_IDS="$WORK_ROOT/phase2b-confirmed-ids"
 if ! extract_contract_ids "$PHASE2B_OUTPUT" CONFIRMED_ID no "$PHASE2B_IDS"; then
     MISSING_OUTPUT=1
@@ -751,6 +831,28 @@ if [ "$CONFIRMED_COUNT" -gt 0 ] && [ "$RECONCILIATION_READY" -eq 1 ]; then
             | sort > "$WORK_ROOT/readme-added-severities"
         if ! cmp -s "$PHASE3D_ADDED_SEVERITIES" "$WORK_ROOT/readme-added-severities"; then
             echo "error: README must preserve every Phase 3d ADDED_SEVERITY exactly" >&2
+            MISSING_OUTPUT=1
+        fi
+
+        README_SUMMARY_COUNTS="$WORK_ROOT/readme-summary-counts"
+        EXPECTED_SUMMARY_COUNTS="$WORK_ROOT/expected-summary-counts"
+        count_report_severities "$README_SEVERITIES" "$EXPECTED_SUMMARY_COUNTS"
+        if ! extract_findings_summary_counts "$README" "$README_SUMMARY_COUNTS" || \
+            ! cmp -s "$EXPECTED_SUMMARY_COUNTS" "$README_SUMMARY_COUNTS"; then
+            echo "error: README Findings Summary counts must match summary-table severities" >&2
+            MISSING_OUTPUT=1
+        fi
+    else
+        MISSING_OUTPUT=1
+    fi
+
+    README_DETAIL_SEVERITIES="$WORK_ROOT/readme-detail-severities"
+    if extract_report_detail_severities "$README" "$README_DETAIL_SEVERITIES"; then
+        awk -F '|' 'NR == FNR { wanted[$1] = 1; next } $1 in wanted { print }' \
+            "$PHASE3D_ADDED_IDS" "$README_DETAIL_SEVERITIES" \
+            | sort > "$WORK_ROOT/readme-added-detail-severities"
+        if ! cmp -s "$PHASE3D_ADDED_SEVERITIES" "$WORK_ROOT/readme-added-detail-severities"; then
+            echo "error: README finding details must preserve every Phase 3d ADDED_SEVERITY exactly" >&2
             MISSING_OUTPUT=1
         fi
     else

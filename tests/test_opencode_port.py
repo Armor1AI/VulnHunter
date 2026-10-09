@@ -386,18 +386,34 @@ if confirmed:
         if scenario.get("BROKEN_REPORT_LINK") == "1"
         else test
     )
+    report_added_severity = scenario.get(
+        "REPORT_ADDED_SEVERITY", added_severity
+    )
+    header_added_severity = scenario.get(
+        "HEADER_ADDED_SEVERITY", report_added_severity
+    )
+    header_severities = ["High"]
+    if scenario.get("SECOND_TEST"):
+        header_severities.append(header_added_severity)
     report = (
         "# VulnHunter Security Audit Report\\n\\n"
+        "**Findings Summary**: "
+        + ", ".join(
+            f"{header_severities.count(severity)} {severity}"
+            for severity in (
+                "High+",
+                "High",
+                "Medium",
+                "Low",
+                "Informational",
+            )
+        )
+        + "\\n\\n"
         "| ID | Title | CWE | Severity | Evidence | Status |\\n"
         "|---|---|---|---|---|---|\\n"
         f"| {finding_id} | SQL injection | CWE-89 | High | "
         f"[PoC]({poc}) \\\\| [Test]({linked_test}) | Confirmed |\\n"
     )
-    if platform_rollup:
-        report += (
-            "\\n- VULN-001 at app.py:1, CWE-306 — "
-            f"SUBSUMED-BY: {finding_id}\\n"
-        )
     manifest = (
         "FINDING_COUNT: 0\\n"
         if scenario.get("OMIT_MANIFEST_FINDING") == "1"
@@ -416,9 +432,6 @@ if confirmed:
             (results / second_test).write_text("# swapped test\\n")
         else:
             (results / second_test).write_text("# independent test\\n")
-        report_added_severity = scenario.get(
-            "REPORT_ADDED_SEVERITY", added_severity
-        )
         report += (
             f"| VULN-002 | Path traversal | CWE-22 | "
             f"{report_added_severity} | [PoC]({second_poc}) "
@@ -427,6 +440,27 @@ if confirmed:
         manifest = (
             f"FINDING_COUNT: 2\\n{finding_id}|{poc}|{test}\\n"
             f"VULN-002|{second_poc}|{second_test}\\n"
+        )
+    report += (
+        f"\\n### [{finding_id}] SQL injection\\n"
+        "| Field | Value |\\n"
+        "|---|---|\\n"
+        "| **Severity** | High |\\n"
+    )
+    if scenario.get("SECOND_TEST"):
+        detail_added_severity = scenario.get(
+            "DETAIL_ADDED_SEVERITY", report_added_severity
+        )
+        report += (
+            "\\n### [VULN-002] Path traversal\\n"
+            "| Field | Value |\\n"
+            "|---|---|\\n"
+            f"| **Severity** | {detail_added_severity} |\\n"
+        )
+    if platform_rollup:
+        report += (
+            "\\n- VULN-001 at app.py:1, CWE-306 — "
+            f"SUBSUMED-BY: {finding_id}\\n"
         )
 else:
     report = (
@@ -606,6 +640,22 @@ if scenario.get("OMIT_ARTIFACT") != "findings.manifest":
                         "REPORT_ADDED_SEVERITY": "Medium",
                     },
                     "README must preserve every Phase 3d ADDED_SEVERITY exactly",
+                ),
+                (
+                    {
+                        "SECOND_TEST": "distinct",
+                        "ADDED_SEVERITY": "Low",
+                        "HEADER_ADDED_SEVERITY": "Medium",
+                    },
+                    "README Findings Summary counts must match summary-table severities",
+                ),
+                (
+                    {
+                        "SECOND_TEST": "distinct",
+                        "ADDED_SEVERITY": "Low",
+                        "DETAIL_ADDED_SEVERITY": "Medium",
+                    },
+                    "README finding details must preserve every Phase 3d ADDED_SEVERITY exactly",
                 ),
                 (
                     {"SECOND_TEST": "shared"},
